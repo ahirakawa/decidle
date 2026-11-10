@@ -2,6 +2,8 @@ use serde::{Deserialize, Serialize};
 use serde_json::json;
 use std::io::Read;
 use std::path::{Path, PathBuf};
+use std::process::{Command, Stdio};
+use std::time::{Duration, Instant};
 
 use crate::check::{check_report, collect_facts, should_check, Report};
 use crate::config::Config;
@@ -103,6 +105,89 @@ fn write_page(report: &Report, paths: &ReportPaths, issues: &[String]) -> Result
     }
     write_atomic(&paths.html, html.as_bytes(), false).map_err(|e| fail(e.to_string()))?;
     Ok(paths.html.to_string_lossy().into_owned())
+}
+
+/// How long one call of the portal command may take before it is killed.
+const PORTAL_TIMEOUT: Duration = Duration::from_secs(5);
+
+/// Runs the Maestri command and returns whether it succeeded and what it printed.
+/// Its output is captured, never inherited, because the hook's own stdout must stay pure JSON.
+fn maestri_command(program: &str, args: &[&str]) -> Result<(bool, String), String> {
+    let mut child = Command::new(program)
+        .args(args)
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null())
+        .spawn()
+        .map_err(|e| format!("{program}: {e}"))?;
+    let deadline = Instant::now() + PORTAL_TIMEOUT;
+    loop {
+        match child.try_wait().map_err(|e| format!("{program}: {e}"))? {
+            Some(status) => {
+                let mut out = String::new();
+                if let Some(pipe) = child.stdout.take() {
+                    let _ = pipe.take(MAX_INPUT_BYTES).read_to_string(&mut out);
+                }
+                return Ok((status.success(), out));
+            }
+            None if Instant::now() >= deadline => {
+                let _ = child.kill();
+                let _ = child.wait();
+                return Err(format!("{program} {} が時間切れになった", args.join(" ")));
+            }
+            None => std::thread::sleep(Duration::from_millis(20)),
+        }
+    }
+}
+
+/// Reads the output of `maestri list`. A terminal that is not a Maestro and is connected to
+/// another agent is taken to be one that an orchestrator started, whose pages the human does not read.
+fn is_worker_terminal(list: &str) -> bool {
+    let mut section = "";
+    let (mut maestro, mut has_agent) = (false, false);
+    for line in list.lines() {
+        if !line.starts_with(' ') {
+            section = line.trim_end();
+        } else if line.starts_with("  - name:") {
+            match section {
+                "You:" => maestro = line.trim_end().ends_with("maestro: true"),
+                "Connected agents:" => has_agent = true,
+                _ => {}
+            }
+        }
+    }
+    !maestro && has_agent
+}
+
+/// Inside Maestri, shows the page in a canvas portal named after the report,
+/// unless this terminal was started by an orchestrator.
+/// A portal of that name left from an earlier stop is pointed at the page again, so stops do not pile up portals.
+/// Returns what went wrong, if anything; the caller only logs it.
+fn show_in_portal(html_path: &str, cfg: &Config) -> Option<String> {
+    if cfg.portal_command.is_empty() || std::env::var_os("MAESTRI_SOCKET").is_none_or(|v| v.is_empty()) {
+        return None;
+    }
+    let name = Path::new(html_path).file_stem().and_then(|n| n.to_str()).unwrap_or_default();
+    // A leading hyphen would be read as an option by the portal command.
+    if name.is_empty() || name.starts_with('-') {
+        return Some(format!("portal: 名前 {name:?} は使えない"));
+    }
+    // If the list cannot be read, show the page: a missing page costs the human more than an extra one.
+    if maestri_command(&cfg.portal_command, &["list"]).is_ok_and(|(ok, out)| ok && is_worker_terminal(&out)) {
+        return None;
+    }
+    let url = file_url(html_path);
+    let portal = |args: &[&str]| maestri_command(&cfg.portal_command, args).map(|(ok, _)| ok);
+    let result = match portal(&["portal", "navigate", name, &url]) {
+        Ok(true) => Ok(true),
+        Ok(false) => portal(&["portal", "create", &url, name]),
+        Err(e) => Err(e),
+    };
+    match result {
+        Ok(true) => None,
+        Ok(false) => Some("portal: create が失敗した".to_string()),
+        Err(e) => Some(format!("portal: {e}")),
+    }
 }
 
 /// Stop hook entry point. Any failure of the gate itself lets the agent stop.
@@ -211,17 +296,20 @@ fn evaluate(input: &HookInput, cfg: &Config, data_dir: &Path, session_id: &str) 
     }
 
     // Passed, or the rejection limit was reached: show the human whatever page can be rendered.
+    let mut portal_error = None;
     let mut message = match &loaded {
         Some((report, paths)) => {
-            format!("report-gate: 報告のページ {}", file_url(&write_page(report, paths, &issues)?))
+            let html_path = write_page(report, paths, &issues)?;
+            portal_error = show_in_portal(&html_path, cfg);
+            format!("report-gate: 報告のページ {}", file_url(&html_path))
         }
         None => "report-gate: 報告のページは作れなかった。".to_string(),
     };
     if issues.is_empty() {
-        log(data_dir, session_id, "pass", &issues, state.rounds, None);
+        log(data_dir, session_id, "pass", &issues, state.rounds, portal_error.as_deref());
     } else {
         message.push_str(&format!("\n{}回差し戻しても次の点が残った。\n{list}", cfg.max_rounds));
-        log(data_dir, session_id, "exhausted", &issues, state.rounds, None);
+        log(data_dir, session_id, "exhausted", &issues, state.rounds, portal_error.as_deref());
     }
     println!("{}", json!({ "systemMessage": message }));
     Ok(())

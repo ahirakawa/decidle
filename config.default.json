@@ -76,5 +76,6 @@
     "maestri ask",
     "Terminal #",
     "報告の点検:"
-  ]
+  ],
+  "portal_command": "maestri"
 }

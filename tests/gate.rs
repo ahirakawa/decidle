@@ -76,10 +76,14 @@ impl Sandbox {
             .env("HOME", &self.home)
             .env_remove("REPORT_GATE_CONFIG")
             .env_remove("REPORT_GATE_MODE")
+            .env_remove("MAESTRI_SOCKET")
             .stdin(Stdio::piped())
             .stdout(Stdio::piped());
         if let Some(m) = mode {
             cmd.env("REPORT_GATE_MODE", m);
+        }
+        if self.home.join("in-maestri").exists() {
+            cmd.env("MAESTRI_SOCKET", "/nonexistent.sock");
         }
         let mut child = cmd.spawn().unwrap();
         child.stdin.take().unwrap().write_all(stdin.as_bytes()).unwrap();
@@ -349,6 +353,111 @@ fn usage_errors_do_not_exit_with_the_blocking_code() {
         let out = Command::new(env!("CARGO_BIN_EXE_report-gate")).args(&args).output().unwrap();
         assert_eq!(out.status.code(), Some(1), "{args:?}");
     }
+}
+
+/// Makes the sandbox look like a Maestri terminal whose portal command is a script
+/// that records its arguments. `navigate` succeeds only when `navigate_ok` is true.
+fn fake_portal(sb: &Sandbox, navigate_ok: bool, create_ok: bool) -> PathBuf {
+    use std::os::unix::fs::PermissionsExt;
+    let calls = sb.home.join("portal-calls");
+    let script = sb.home.join("fake-maestri");
+    let code = |ok: bool| if ok { 0 } else { 1 };
+    fs::write(
+        &script,
+        format!(
+            "#!/bin/sh\nif [ \"$1\" = list ]; then cat '{}' 2>/dev/null; exit 0; fi\necho noise-on-stdout\necho \"$@\" >> '{}'\n[ \"$2\" = navigate ] && exit {}\nexit {}\n",
+            sb.home.join("maestri-list").display(),
+            calls.display(),
+            code(navigate_ok),
+            code(create_ok)
+        ),
+    )
+    .unwrap();
+    fs::set_permissions(&script, fs::Permissions::from_mode(0o755)).unwrap();
+    fs::write(
+        sb.home.join(".config/agent-report-gate/config.json"),
+        json!({"ignore_path_patterns": ["/ignored/", ".report-gate/"], "portal_command": script}).to_string(),
+    )
+    .unwrap();
+    fs::write(sb.home.join("in-maestri"), "").unwrap();
+    calls
+}
+
+fn passing_transcript(sb: &Sandbox) -> PathBuf {
+    let r = sb.report(&report(json!([]), json!([]), notes()));
+    sb.transcript(&[edit(&sb.file("notes.md")), r])
+}
+
+#[test]
+fn portal_is_created_when_none_exists_and_navigated_when_one_does() {
+    let sb = Sandbox::new();
+    let calls = fake_portal(&sb, false, true);
+    passed(&sb.stop(&passing_transcript(&sb), "p1"));
+    let lines: Vec<String> = fs::read_to_string(&calls).unwrap().lines().map(String::from).collect();
+    assert_eq!(lines.len(), 2, "{lines:?}");
+    assert!(lines[0].starts_with("portal navigate task file:///") && lines[0].ends_with("task.html"), "{lines:?}");
+    assert!(lines[1].starts_with("portal create file:///") && lines[1].ends_with("task.html task"), "{lines:?}");
+    assert!(sb.log_lines()[0]["error"].is_null());
+
+    let sb = Sandbox::new();
+    let calls = fake_portal(&sb, true, true);
+    passed(&sb.stop(&passing_transcript(&sb), "p1"));
+    let only = fs::read_to_string(&calls).unwrap();
+    assert!(only.lines().count() == 1 && only.starts_with("portal navigate task file:///"), "{only}");
+}
+
+#[test]
+fn portal_is_not_touched_outside_maestri_or_when_turned_off() {
+    let sb = Sandbox::new();
+    let calls = fake_portal(&sb, false, true);
+    fs::remove_file(sb.home.join("in-maestri")).unwrap();
+    passed(&sb.stop(&passing_transcript(&sb), "p1"));
+    assert!(!calls.exists());
+
+    let sb = Sandbox::new();
+    let calls = fake_portal(&sb, false, true);
+    fs::write(
+        sb.home.join(".config/agent-report-gate/config.json"),
+        r#"{"ignore_path_patterns": ["/ignored/", ".report-gate/"], "portal_command": ""}"#,
+    )
+    .unwrap();
+    passed(&sb.stop(&passing_transcript(&sb), "p1"));
+    assert!(!calls.exists());
+}
+
+#[test]
+fn portal_is_not_shown_in_a_terminal_started_by_an_orchestrator() {
+    let worker = "You:\n  - name: \"Worker\"\n\nConnected agents:\n  - name: \"Terminal #4\"\n\nConnected portals (use `maestri portal check`):\n  - name: \"task\" - url: (url)\n";
+    let orchestrator = "You:\n  - name: \"Terminal #4\", maestro: true\n\nConnected agents:\n  - name: \"Worker\"\n    ⎿ portal: \"task\" - url: (url)\n";
+    let alone = "You:\n  - name: \"Terminal #5\"\n\nConnected portals (use `maestri portal check`):\n  - name: \"task\" - url: (url)\n";
+    for (list, shown) in [(worker, false), (orchestrator, true), (alone, true)] {
+        let sb = Sandbox::new();
+        let calls = fake_portal(&sb, false, true);
+        fs::write(sb.home.join("maestri-list"), list).unwrap();
+        passed(&sb.stop(&passing_transcript(&sb), "p1"));
+        assert_eq!(calls.exists(), shown, "{list}");
+        assert!(sb.log_lines()[0]["error"].is_null());
+    }
+}
+
+#[test]
+fn portal_failure_still_passes_and_is_logged() {
+    let sb = Sandbox::new();
+    fake_portal(&sb, false, false);
+    passed(&sb.stop(&passing_transcript(&sb), "p1"));
+    let log = sb.log_lines();
+    assert_eq!(log[0]["verdict"], "pass");
+    assert!(log[0]["error"].as_str().unwrap().contains("portal"), "{log:?}");
+
+    let sb = Sandbox::new();
+    fake_portal(&sb, false, true);
+    fs::write(
+        sb.home.join(".config/agent-report-gate/config.json"),
+        r#"{"ignore_path_patterns": ["/ignored/", ".report-gate/"], "portal_command": "/nonexistent/maestri"}"#,
+    )
+    .unwrap();
+    passed(&sb.stop(&passing_transcript(&sb), "p1"));
+    assert!(sb.log_lines()[0]["error"].as_str().unwrap().contains("portal"));
 }
 
 #[test]

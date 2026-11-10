@@ -36,6 +36,7 @@ Claude Code の Stop hook。エージェントに報告を JSON で書かせ、�
 - 点検の記録は `~/.local/share/agent-report-gate/gate.jsonl` に残る。`docs/queries.sql` の SQL で集計できる。
 - 字数の上限やコード扱いの拡張子は、`config.default.json` と同じ形のファイルを `~/.config/agent-report-gate/config.json` に置くと、書いたキーだけ上書きされる。
 - 報告の JSON とページは、作業したフォルダの `.report-gate/` にできる。git に入れたくなければ、各自の gitignore に足す。
+- Maestri のターミナルでは、ページを書いたあと、作業名の portal をキャンバスに出す。Maestro ではなく、ほかのエージェントとつながっているターミナルは、まとめ役が起動した作業ターミナルとみなして出さない。同じ名前の portal が残っていれば、そこに新しいページを表示する。出したくなければ、設定の `portal_command` を空にする。
 
 ## 修正依頼の回数を数える
 

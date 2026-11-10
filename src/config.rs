@@ -31,6 +31,8 @@ pub struct Config {
     pub verification_rules: Vec<VerificationRule>,
     pub max_rounds: u32,
     pub agent_prompt_markers: Vec<String>,
+    /// Command whose `portal` subcommand shows the page inside Maestri. Empty turns this off.
+    pub portal_command: String,
 }
 
 impl Config {
