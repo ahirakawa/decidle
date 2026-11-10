@@ -1,0 +1,80 @@
+{
+  "report_dir": ".report-gate",
+  "report_suffix": ".report.json",
+  "conclusion_max_chars": 200,
+  "reply_max_chars": 400,
+  "code_extensions": [
+    "rs",
+    "py",
+    "ts",
+    "tsx",
+    "js",
+    "jsx",
+    "go",
+    "java",
+    "kt",
+    "swift",
+    "c",
+    "h",
+    "cpp",
+    "rb",
+    "php",
+    "sh",
+    "sql"
+  ],
+  "ignore_path_patterns": [
+    "/tmp/",
+    "/var/folders/",
+    ".claude/",
+    ".report-gate/"
+  ],
+  "edit_tools": [
+    "Edit",
+    "Write",
+    "NotebookEdit"
+  ],
+  "tool_call_threshold": 8,
+  "trigger_commands": [
+    "maestri ask"
+  ],
+  "role_dir_marker": "/.maestri/roles/",
+  "review_command": "maestri ask",
+  "review_marker": "報告の点検:",
+  "verification_rules": [
+    {
+      "words": [
+        "テスト",
+        "test"
+      ],
+      "commands": [
+        "test"
+      ]
+    },
+    {
+      "words": [
+        "ビルド",
+        "build"
+      ],
+      "commands": [
+        "build",
+        "cargo check",
+        "tsc",
+        "make"
+      ]
+    },
+    {
+      "words": [
+        "push"
+      ],
+      "commands": [
+        "git push"
+      ]
+    }
+  ],
+  "max_rounds": 2,
+  "agent_prompt_markers": [
+    "maestri ask",
+    "Terminal #",
+    "報告の点検:"
+  ]
+}
