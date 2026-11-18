@@ -16,16 +16,16 @@ struct Sandbox {
 impl Sandbox {
     fn new() -> Sandbox {
         let n = COUNTER.fetch_add(1, Ordering::SeqCst);
-        let root = std::env::temp_dir().join(format!("report-gate-test-{}-{n}", std::process::id()));
+        let root = std::env::temp_dir().join(format!("decidle-test-{}-{n}", std::process::id()));
         let _ = fs::remove_dir_all(&root);
         // The default ignore patterns exclude temp directories, so tests use an explicit config.
         let home = root.join("home");
         let cwd = root.join("work");
-        fs::create_dir_all(home.join(".config/agent-report-gate")).unwrap();
+        fs::create_dir_all(home.join(".config/decidle")).unwrap();
         fs::create_dir_all(&cwd).unwrap();
         fs::write(
-            home.join(".config/agent-report-gate/config.json"),
-            r#"{"edited_files_threshold": 1, "tool_call_threshold": 8, "ignore_path_patterns": ["/ignored/", ".report-gate/"]}"#,
+            home.join(".config/decidle/config.json"),
+            r#"{"edited_files_threshold": 1, "tool_call_threshold": 8, "ignore_path_patterns": ["/ignored/", ".decidle/"]}"#,
         )
         .unwrap();
         Sandbox { home, cwd }
@@ -40,14 +40,14 @@ impl Sandbox {
 
     /// Writes the report JSON and returns the tool call that would have written it.
     fn report(&self, report: &Value) -> Value {
-        let p = self.cwd.join(".report-gate/task.report.json");
+        let p = self.cwd.join(".decidle/task.report.json");
         fs::create_dir_all(p.parent().unwrap()).unwrap();
         fs::write(&p, report.to_string()).unwrap();
         json!({"type":"tool_use","name":"Write","input":{"file_path":p}})
     }
 
     fn page(&self) -> String {
-        fs::read_to_string(self.cwd.join(".report-gate/task.html")).unwrap_or_default()
+        fs::read_to_string(self.cwd.join(".decidle/task.html")).unwrap_or_default()
     }
 
     fn transcript(&self, tools: &[Value]) -> PathBuf {
@@ -71,16 +71,16 @@ impl Sandbox {
     }
 
     fn run_raw(&self, stdin: &str, mode: Option<&str>) -> String {
-        let mut cmd = Command::new(env!("CARGO_BIN_EXE_report-gate"));
+        let mut cmd = Command::new(env!("CARGO_BIN_EXE_decidle"));
         cmd.arg("stop")
             .env("HOME", &self.home)
-            .env_remove("REPORT_GATE_CONFIG")
-            .env_remove("REPORT_GATE_MODE")
+            .env_remove("DECIDLE_CONFIG")
+            .env_remove("DECIDLE_MODE")
             .env_remove("MAESTRI_SOCKET")
             .stdin(Stdio::piped())
             .stdout(Stdio::piped());
         if let Some(m) = mode {
-            cmd.env("REPORT_GATE_MODE", m);
+            cmd.env("DECIDLE_MODE", m);
         }
         if self.home.join("in-maestri").exists() {
             cmd.env("MAESTRI_SOCKET", "/nonexistent.sock");
@@ -110,7 +110,7 @@ impl Sandbox {
 
     /// Lines of the Home page's events.jsonl.
     fn events(&self) -> Vec<Value> {
-        fs::read_to_string(self.home.join(".local/share/agent-report-gate/events.jsonl"))
+        fs::read_to_string(self.home.join(".local/share/decidle/events.jsonl"))
             .unwrap_or_default()
             .lines()
             .map(|l| serde_json::from_str(l).unwrap())
@@ -118,7 +118,7 @@ impl Sandbox {
     }
 
     fn log_lines(&self) -> Vec<Value> {
-        fs::read_to_string(self.home.join(".local/share/agent-report-gate/gate.jsonl"))
+        fs::read_to_string(self.home.join(".local/share/decidle/gate.jsonl"))
             .unwrap_or_default()
             .lines()
             .map(|l| serde_json::from_str(l).unwrap())
@@ -202,10 +202,10 @@ fn missing_report_is_blocked_once_without_using_a_round() {
 #[test]
 fn report_outside_report_folder_is_rejected_and_nothing_is_written() {
     let sb = Sandbox::new();
-    fs::create_dir_all(sb.cwd.join(".report-gate")).unwrap();
+    fs::create_dir_all(sb.cwd.join(".decidle")).unwrap();
     fs::create_dir_all(sb.cwd.join("public")).unwrap();
     fs::write(sb.cwd.join("public/index.report.json"), report(json!([]), json!([]), notes()).to_string()).unwrap();
-    let sneaky = sb.cwd.join(".report-gate/../public/index.report.json");
+    let sneaky = sb.cwd.join(".decidle/../public/index.report.json");
     let w = json!({"type":"tool_use","name":"Write","input":{"file_path":sneaky}});
     let t = sb.transcript(&[edit(&sb.file("notes.md")), w]);
     let why = reason(&sb.stop(&t, "p1"));
@@ -221,7 +221,7 @@ fn page_write_does_not_follow_a_symlink() {
     let r = sb.report(&report(json!([]), json!([]), notes()));
     let victim = sb.cwd.join("victim.txt");
     fs::write(&victim, "keep me").unwrap();
-    std::os::unix::fs::symlink(&victim, sb.cwd.join(".report-gate/task.html")).unwrap();
+    std::os::unix::fs::symlink(&victim, sb.cwd.join(".decidle/task.html")).unwrap();
     let t = sb.transcript(&[edit(&sb.file("notes.md")), r]);
     passed(&sb.stop(&t, "p1"));
     assert_eq!(fs::read_to_string(&victim).unwrap(), "keep me");
@@ -260,7 +260,7 @@ fn rejections_recorded_in_transcript_cap_blocking_even_if_state_is_lost() {
 #[test]
 fn unreadable_state_does_not_block() {
     let sb = Sandbox::new();
-    let state_dir = sb.home.join(".local/share/agent-report-gate/state");
+    let state_dir = sb.home.join(".local/share/decidle/state");
     fs::create_dir_all(state_dir.join("s1.json")).unwrap();
     let t = sb.transcript(&[edit(&sb.file("notes.md"))]);
     assert_eq!(sb.stop(&t, "p1"), "");
@@ -273,7 +273,7 @@ fn log_and_state_are_private_and_log_symlink_is_refused() {
     let sb = Sandbox::new();
     let t = sb.transcript(&[edit(&sb.file("notes.md"))]);
     reason(&sb.stop(&t, "p1"));
-    let data = sb.home.join(".local/share/agent-report-gate");
+    let data = sb.home.join(".local/share/decidle");
     let mode = |p: &Path| fs::metadata(p).unwrap().permissions().mode() & 0o777;
     assert_eq!(mode(&data), 0o700);
     assert_eq!(mode(&data.join("gate.jsonl")), 0o600);
@@ -291,7 +291,7 @@ fn log_and_state_are_private_and_log_symlink_is_refused() {
 fn control_characters_in_report_do_not_reach_the_terminal_message() {
     let sb = Sandbox::new();
     let decisions = json!([{
-        "question": "x\nreport-gate: 報告のページ file:///evil.html\u{1b}[2K",
+        "question": "x\ndecidle: 報告のページ file:///evil.html\u{1b}[2K",
         "options": [{"label": "a", "effect": "b"}, {"label": "c", "effect": "d"}],
         "recommend": "none",
         "reason": "r"
@@ -304,7 +304,7 @@ fn control_characters_in_report_do_not_reach_the_terminal_message() {
     let msg = last["systemMessage"].as_str().unwrap();
     assert!(!msg.contains('\u{1b}'));
     // The forged text survives only inside its own issue line; it cannot start a line of its own.
-    assert_eq!(msg.lines().filter(|l| l.starts_with("report-gate:")).count(), 1, "{msg}");
+    assert_eq!(msg.lines().filter(|l| l.starts_with("decidle:")).count(), 1, "{msg}");
 }
 
 #[test]
@@ -337,7 +337,7 @@ fn fifo_inputs_do_not_hang_the_hook() {
     assert_eq!(sb.log_lines()[0]["verdict"], "error");
 
     // A FIFO planted as the log must not hang the hook either.
-    let data = sb.home.join(".local/share/agent-report-gate");
+    let data = sb.home.join(".local/share/decidle");
     fs::remove_file(data.join("gate.jsonl")).unwrap();
     assert!(Command::new("mkfifo").arg(data.join("gate.jsonl")).status().unwrap().success());
     let t = sb.transcript(&[edit(&sb.file("notes.md"))]);
@@ -347,7 +347,7 @@ fn fifo_inputs_do_not_hang_the_hook() {
 #[test]
 fn log_hard_linked_elsewhere_is_not_appended_to() {
     let sb = Sandbox::new();
-    let data = sb.home.join(".local/share/agent-report-gate");
+    let data = sb.home.join(".local/share/decidle");
     fs::create_dir_all(&data).unwrap();
     let victim = sb.cwd.join("victim.txt");
     fs::write(&victim, "keep me").unwrap();
@@ -360,7 +360,7 @@ fn log_hard_linked_elsewhere_is_not_appended_to() {
 #[test]
 fn usage_errors_do_not_exit_with_the_blocking_code() {
     for args in [vec!["Stop"], vec!["render"], vec![]] {
-        let out = Command::new(env!("CARGO_BIN_EXE_report-gate")).args(&args).output().unwrap();
+        let out = Command::new(env!("CARGO_BIN_EXE_decidle")).args(&args).output().unwrap();
         assert_eq!(out.status.code(), Some(1), "{args:?}");
     }
 }
@@ -385,8 +385,8 @@ fn fake_portal(sb: &Sandbox, navigate_ok: bool, create_ok: bool) -> PathBuf {
     .unwrap();
     fs::set_permissions(&script, fs::Permissions::from_mode(0o755)).unwrap();
     fs::write(
-        sb.home.join(".config/agent-report-gate/config.json"),
-        json!({"edited_files_threshold": 1, "tool_call_threshold": 8, "ignore_path_patterns": ["/ignored/", ".report-gate/"], "portal_command": script}).to_string(),
+        sb.home.join(".config/decidle/config.json"),
+        json!({"edited_files_threshold": 1, "tool_call_threshold": 8, "ignore_path_patterns": ["/ignored/", ".decidle/"], "portal_command": script}).to_string(),
     )
     .unwrap();
     fs::write(sb.home.join("in-maestri"), "").unwrap();
@@ -427,8 +427,8 @@ fn portal_is_not_touched_outside_maestri_or_when_turned_off() {
     let sb = Sandbox::new();
     let calls = fake_portal(&sb, false, true);
     fs::write(
-        sb.home.join(".config/agent-report-gate/config.json"),
-        r#"{"edited_files_threshold": 1, "tool_call_threshold": 8, "ignore_path_patterns": ["/ignored/", ".report-gate/"], "portal_command": ""}"#,
+        sb.home.join(".config/decidle/config.json"),
+        r#"{"edited_files_threshold": 1, "tool_call_threshold": 8, "ignore_path_patterns": ["/ignored/", ".decidle/"], "portal_command": ""}"#,
     )
     .unwrap();
     passed(&sb.stop(&passing_transcript(&sb), "p1"));
@@ -462,8 +462,8 @@ fn portal_failure_still_passes_and_is_logged() {
     let sb = Sandbox::new();
     fake_portal(&sb, false, true);
     fs::write(
-        sb.home.join(".config/agent-report-gate/config.json"),
-        r#"{"edited_files_threshold": 1, "tool_call_threshold": 8, "ignore_path_patterns": ["/ignored/", ".report-gate/"], "portal_command": "/nonexistent/maestri"}"#,
+        sb.home.join(".config/decidle/config.json"),
+        r#"{"edited_files_threshold": 1, "tool_call_threshold": 8, "ignore_path_patterns": ["/ignored/", ".decidle/"], "portal_command": "/nonexistent/maestri"}"#,
     )
     .unwrap();
     passed(&sb.stop(&passing_transcript(&sb), "p1"));
@@ -474,12 +474,12 @@ fn portal_failure_still_passes_and_is_logged() {
 fn render_command_writes_page_and_prints_url() {
     let sb = Sandbox::new();
     sb.report(&report(json!([]), json!([]), notes()));
-    let json_path = sb.cwd.join(".report-gate/task.report.json");
-    let out = Command::new(env!("CARGO_BIN_EXE_report-gate"))
+    let json_path = sb.cwd.join(".decidle/task.report.json");
+    let out = Command::new(env!("CARGO_BIN_EXE_decidle"))
         .arg("render")
         .arg(&json_path)
         .env("HOME", &sb.home)
-        .env_remove("REPORT_GATE_CONFIG")
+        .env_remove("DECIDLE_CONFIG")
         .output()
         .unwrap();
     assert!(out.status.success());
@@ -491,7 +491,7 @@ fn render_command_writes_page_and_prints_url() {
     let elsewhere = sb.cwd.join("data.json");
     fs::write(&elsewhere, report(json!([]), json!([]), notes()).to_string()).unwrap();
     for path in [&json_path, &elsewhere] {
-        let bad = Command::new(env!("CARGO_BIN_EXE_report-gate")).arg("render").arg(path).env("HOME", &sb.home).output().unwrap();
+        let bad = Command::new(env!("CARGO_BIN_EXE_decidle")).arg("render").arg(path).env("HOME", &sb.home).output().unwrap();
         assert_eq!(bad.status.code(), Some(1));
     }
     assert!(!sb.cwd.join("data.json.html").exists());
@@ -681,9 +681,9 @@ fn short_exchange_is_not_checked() {
 
 #[test]
 fn small_turns_are_not_checked_with_the_default_thresholds() {
-    let default_thresholds = r#"{"ignore_path_patterns": ["/ignored/", ".report-gate/"]}"#;
+    let default_thresholds = r#"{"ignore_path_patterns": ["/ignored/", ".decidle/"]}"#;
     let sb = Sandbox::new();
-    fs::write(sb.home.join(".config/agent-report-gate/config.json"), default_thresholds).unwrap();
+    fs::write(sb.home.join(".config/decidle/config.json"), default_thresholds).unwrap();
     let mut tools = vec![edit(&sb.file("a.md")), edit(&sb.file("b.md"))];
     tools.extend((0..17).map(|_| bash("ls")));
     assert_eq!(sb.stop(&sb.transcript(&tools), "p1"), "", "2 edits and 19 tool calls");
@@ -696,7 +696,7 @@ fn small_turns_are_not_checked_with_the_default_thresholds() {
     assert!(why.contains("`maestri ask` を実行した") && why.contains("当たらないターンでは"), "{why}");
 
     let sb = Sandbox::new();
-    fs::write(sb.home.join(".config/agent-report-gate/config.json"), default_thresholds).unwrap();
+    fs::write(sb.home.join(".config/decidle/config.json"), default_thresholds).unwrap();
     let many: Vec<Value> = (0..20).map(|_| bash("ls")).collect();
     assert!(reason(&sb.stop(&sb.transcript(&many), "p1")).contains("報告の JSON が書かれていない"));
 }
@@ -737,11 +737,11 @@ fn extract_pairs_prompts_with_previous_report() {
     ];
     let text: String = lines.iter().map(|l| format!("{l}\n")).collect();
     fs::write(dir.join("s9.jsonl"), text).unwrap();
-    let out = Command::new(env!("CARGO_BIN_EXE_report-gate"))
+    let out = Command::new(env!("CARGO_BIN_EXE_decidle"))
         .args(["extract", "--projects-dir"])
         .arg(sb.home.join("projects"))
         .env("HOME", &sb.home)
-        .env_remove("REPORT_GATE_CONFIG")
+        .env_remove("DECIDLE_CONFIG")
         .output()
         .unwrap();
     assert!(out.status.success());
@@ -786,8 +786,16 @@ fn passing_stop_records_the_report_on_the_home_page() {
     let line = &stop_lines(&sb, 1)[0];
     assert_eq!(line["report_title"], "設定の修正");
     assert_eq!(line["decisions"], 1);
-    assert!(line["report_path"].as_str().unwrap().ends_with(".report-gate/task.report.json"), "{line}");
-    assert!(line["report_html"].as_str().unwrap().ends_with(".report-gate/task.html"), "{line}");
+    assert!(line["report_path"].as_str().unwrap().ends_with(".decidle/task.report.json"), "{line}");
+    assert!(line["report_html"].as_str().unwrap().ends_with(".decidle/task.html"), "{line}");
+    // The question and the goal come from the report the agent wrote, for the Home card.
+    assert_eq!(line["questions"], json!(["保存先をどちらにするか"]));
+    assert_eq!(line["report_goal"], "設定の誤りで止まる作業を、また動くようにしたい。");
+    // The prompt text and the other parts of the report are not copied into the stop line.
+    let text = line.to_string();
+    for absent in ["作業して", "直して", "ローカル", "外に出さない", "設定を直した。"] {
+        assert!(!text.contains(absent), "{absent}: {line}");
+    }
 }
 
 #[test]
@@ -831,12 +839,12 @@ fn off_mode_records_a_stop() {
 fn failing_to_record_the_stop_does_not_change_the_verdict() {
     // events.jsonl is a folder, so the append fails.
     let sb = Sandbox::new();
-    fs::create_dir_all(sb.home.join(".local/share/agent-report-gate/events.jsonl")).unwrap();
+    fs::create_dir_all(sb.home.join(".local/share/decidle/events.jsonl")).unwrap();
     passed(&sb.stop(&passing_transcript(&sb), "p1"));
     assert_eq!(sb.log_lines()[0]["verdict"], "pass");
 
     let sb = Sandbox::new();
-    fs::create_dir_all(sb.home.join(".local/share/agent-report-gate/events.jsonl")).unwrap();
+    fs::create_dir_all(sb.home.join(".local/share/decidle/events.jsonl")).unwrap();
     let t = sb.transcript(&[edit(&sb.file("notes.md"))]);
     assert!(reason(&sb.stop(&t, "p1")).contains("報告の JSON が書かれていない"));
 }
@@ -857,7 +865,7 @@ fn real_stop_records_only_when_stopping_and_never_the_text() {
     // Fixed reply: the gate lets the agent stop.
     passed(&sb.stop_with_reply(&t, &format!("{marker}を直した。"), "p1"));
     stop_lines(&sb, 1);
-    let text = fs::read_to_string(sb.home.join(".local/share/agent-report-gate/events.jsonl")).unwrap();
+    let text = fs::read_to_string(sb.home.join(".local/share/decidle/events.jsonl")).unwrap();
     assert_eq!(text.matches(marker).count(), 0, "{text}");
 }
 
@@ -880,11 +888,11 @@ fn stop_line_does_not_depend_on_fields_the_report_check_reads() {
 fn stop_line_names_the_page_written_with_a_custom_suffix() {
     let sb = Sandbox::new();
     fs::write(
-        sb.home.join(".config/agent-report-gate/config.json"),
-        r#"{"edited_files_threshold": 1, "tool_call_threshold": 8, "ignore_path_patterns": ["/ignored/", ".report-gate/"], "report_suffix": ".rep.json"}"#,
+        sb.home.join(".config/decidle/config.json"),
+        r#"{"edited_files_threshold": 1, "tool_call_threshold": 8, "ignore_path_patterns": ["/ignored/", ".decidle/"], "report_suffix": ".rep.json"}"#,
     )
     .unwrap();
-    let p = sb.cwd.join(".report-gate/task.rep.json");
+    let p = sb.cwd.join(".decidle/task.rep.json");
     fs::create_dir_all(p.parent().unwrap()).unwrap();
     fs::write(&p, report(json!([]), json!([]), notes()).to_string()).unwrap();
     let write = json!({"type":"tool_use","name":"Write","input":{"file_path":p}});
@@ -893,7 +901,7 @@ fn stop_line_names_the_page_written_with_a_custom_suffix() {
     assert!(out.get("decision").is_none(), "{out}");
     let line = &stop_lines(&sb, 1)[0];
     let html = line["report_html"].as_str().unwrap();
-    assert!(html.ends_with(".report-gate/task.html"), "{line}");
+    assert!(html.ends_with(".decidle/task.html"), "{line}");
     assert!(Path::new(html).is_file());
 }
 
@@ -934,7 +942,7 @@ fn stop_line_keeps_only_the_home_line_of_the_reply() {
         assert_eq!(l["attention"], "unknown", "{l}");
         assert!(l.get("note").is_none(), "{l}");
     }
-    let text = fs::read_to_string(sb.home.join(".local/share/agent-report-gate/events.jsonl")).unwrap();
+    let text = fs::read_to_string(sb.home.join(".local/share/decidle/events.jsonl")).unwrap();
     assert_eq!(text.matches("BODY-91c2").count(), 0, "{text}");
 }
 

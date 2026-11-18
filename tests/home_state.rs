@@ -1,8 +1,8 @@
 //! The Rust reducer against a direct transcription of `Step` in docs/tla/Home.tla,
 //! on random event sequences.
 
-use report_gate::home::note::Attention;
-use report_gate::home::state::{self, Event, Kind, St};
+use decidle::home::note::Attention;
+use decidle::home::state::{self, Event, Kind, St};
 
 /// `acc` of the model: st, lastStop (an index into the log, 0 = none), dec and att.
 #[derive(Clone, Copy, Debug, PartialEq)]

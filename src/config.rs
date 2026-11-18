@@ -38,20 +38,20 @@ pub struct Config {
     /// Command whose `portal` subcommand shows the page inside Maestri. Empty (the default) turns
     /// this off; the human opens the page from the report title on the Home page instead.
     pub portal_command: String,
-    /// Port of the Home page (`report-gate serve`), on 127.0.0.1.
+    /// Port of the Home page (`decidle serve`), on 127.0.0.1.
     pub home_port: u16,
 }
 
 impl Config {
-    /// Looks up $REPORT_GATE_CONFIG, then ~/.config/agent-report-gate/config.json.
+    /// Looks up $DECIDLE_CONFIG, then ~/.config/decidle/config.json.
     /// Top-level keys of the user file override the embedded defaults.
     pub fn load() -> Result<Config, String> {
         let mut merged: Value =
             serde_json::from_str(DEFAULT_CONFIG).map_err(|e| format!("default config: {e}"))?;
-        let user_path = match std::env::var("REPORT_GATE_CONFIG") {
+        let user_path = match std::env::var("DECIDLE_CONFIG") {
             Ok(p) if !p.is_empty() => Some(PathBuf::from(p)),
             _ => {
-                let p = home().join(".config/agent-report-gate/config.json");
+                let p = home().join(".config/decidle/config.json");
                 p.exists().then_some(p)
             }
         };

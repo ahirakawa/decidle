@@ -12,7 +12,7 @@ pub fn run(args: &[String]) -> i32 {
     let cfg = match Config::load() {
         Ok(c) => c,
         Err(e) => {
-            eprintln!("report-gate: {e}");
+            eprintln!("decidle: {e}");
             return 1;
         }
     };
@@ -20,13 +20,13 @@ pub fn run(args: &[String]) -> i32 {
         [] => home().join(".claude/projects"),
         [flag, dir] if flag == "--projects-dir" => PathBuf::from(dir),
         _ => {
-            eprintln!("usage: report-gate extract [--projects-dir DIR]");
+            eprintln!("usage: decidle extract [--projects-dir DIR]");
             return 1;
         }
     };
     let mut files: Vec<PathBuf> = Vec::new();
     let Ok(projects) = std::fs::read_dir(&projects_dir) else {
-        eprintln!("report-gate: {} を読めない", projects_dir.display());
+        eprintln!("decidle: {} を読めない", projects_dir.display());
         return 1;
     };
     for project in projects.flatten() {

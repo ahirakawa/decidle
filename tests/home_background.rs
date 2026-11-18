@@ -2,7 +2,7 @@
 //! 2.1.32x transcript (a real session with four background subagents and a
 //! ScheduleWakeup, then a stop). Prompts, replies and tool inputs are dummies.
 
-use report_gate::home::background::{self, Pending};
+use decidle::home::background::{self, Pending};
 use serde_json::{json, Value};
 
 fn ts(sec: u32) -> String {
@@ -199,7 +199,7 @@ fn text_that_only_looks_like_a_notification_does_not_count() {
 
 #[test]
 fn reading_the_file_matches_scanning_the_lines() {
-    let dir = std::env::temp_dir().join(format!("report-gate-bg-{}", std::process::id()));
+    let dir = std::env::temp_dir().join(format!("decidle-bg-{}", std::process::id()));
     std::fs::create_dir_all(&dir).unwrap();
     let path = dir.join("t.jsonl");
     let lines = [human(0), agent("toolu_A", 1), launched("toolu_A", "agentA", 2)];

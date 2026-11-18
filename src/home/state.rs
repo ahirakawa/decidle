@@ -67,6 +67,9 @@ pub struct Event {
     /// stop only: the agent's `Home:` line. Missing on old lines, which reads as Unknown.
     pub attention: Attention,
     pub note: Option<String>,
+    /// stop only: the questions of the report's decisions, and its goal.
+    pub questions: Vec<String>,
+    pub report_goal: Option<String>,
 }
 
 /// The accumulator of the fold. `st`, `last_stop` and `decisions` are the model's `st`,
@@ -86,6 +89,10 @@ pub struct Session {
     pub report_path: Option<String>,
     pub report_html: Option<String>,
     pub report_title: Option<String>,
+    pub questions: Vec<String>,
+    pub report_goal: Option<String>,
+    /// ts of the latest start line (startup, resume or clear). None if the log has none.
+    pub started: Option<String>,
     pub pid: Option<i64>,
     pub pid_started: Option<i64>,
     pub transcript_path: Option<String>,
@@ -112,6 +119,9 @@ pub fn step(acc: &Session, ev: &Event) -> Session {
             next.report_path = None;
             next.report_html = None;
             next.report_title = None;
+            next.questions = Vec::new();
+            next.report_goal = None;
+            next.started = Some(ev.ts.clone());
             next.pid = ev.pid;
             next.pid_started = ev.pid_started;
             next.transcript_path = ev.transcript_path.clone();
@@ -128,6 +138,8 @@ pub fn step(acc: &Session, ev: &Event) -> Session {
             next.report_path = ev.report_path.clone();
             next.report_html = ev.report_html.clone();
             next.report_title = ev.report_title.clone();
+            next.questions = ev.questions.clone();
+            next.report_goal = ev.report_goal.clone();
         }
         Some(Kind::Resolved) if current_stop(acc, &ev.resolves) => next.st = St::Resolved,
         Some(Kind::Kill) if current_stop(acc, &ev.resolves) => next.st = St::Ended,

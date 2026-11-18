@@ -22,7 +22,7 @@ const MAX_HOOK_INPUT_BYTES: u64 = 1024 * 1024;
 const TAIL_BYTES: u64 = 64 * 1024;
 
 pub fn events_path() -> PathBuf {
-    PathBuf::from(std::env::var("HOME").unwrap_or_default()).join(".local/share/agent-report-gate/events.jsonl")
+    PathBuf::from(std::env::var("HOME").unwrap_or_default()).join(".local/share/decidle/events.jsonl")
 }
 
 /// The current time as RFC 3339 UTC with microseconds. The microseconds keep the ts of two
@@ -191,13 +191,18 @@ fn base(session_id: &str, cwd: &str, event: &str) -> Map<String, Value> {
 /// The report that came with a stop.
 pub struct StopReport {
     pub path: String,
-    /// The page that report-gate stop actually wrote. The Home page serves only these.
+    /// The page that decidle stop actually wrote. The Home page serves only these.
     pub html: String,
     pub title: String,
     pub decisions: usize,
+    /// The `question` of each decision in the report, as the agent wrote it (at most
+    /// `question_max_chars` characters each). Never prompt or reply text.
+    pub questions: Vec<String>,
+    /// The report's `goal`, as the agent wrote it.
+    pub goal: String,
 }
 
-/// What `report-gate stop` records about the stop besides the report.
+/// What `decidle stop` records about the stop besides the report.
 #[derive(Default)]
 pub struct StopInfo {
     /// The agent still waits on background work (see `background.rs`).
@@ -207,7 +212,7 @@ pub struct StopInfo {
     pub note: Option<String>,
 }
 
-/// Appends the stop line. `report-gate stop` calls this when it lets the agent stop.
+/// Appends the stop line. `decidle stop` calls this when it lets the agent stop.
 pub fn append_stop(
     path: &Path,
     session_id: &str,
@@ -228,6 +233,10 @@ pub fn append_stop(
         m.insert("report_html".into(), json!(r.html));
         m.insert("report_title".into(), json!(r.title));
         m.insert("decisions".into(), json!(r.decisions));
+        m.insert("questions".into(), json!(r.questions));
+        if !r.goal.is_empty() {
+            m.insert("report_goal".into(), json!(r.goal));
+        }
     }
     append(path, m, HOOK_LOCK_TIMEOUT)
 }
@@ -308,7 +317,7 @@ fn record(path: &Path, stdin: &mut dyn Read) -> (bool, Result<(), String>) {
     (start, result)
 }
 
-/// `report-gate event`. Never fails: the exit code is always 0. Only SessionStart prints, and it
+/// `decidle event`. Never fails: the exit code is always 0. Only SessionStart prints, and it
 /// prints the additional context even when the append fails. Other hooks print nothing, because
 /// the UserPromptSubmit hook would add stdout to the agent's context.
 pub fn run_hook() -> i32 {
@@ -316,12 +325,12 @@ pub fn run_hook() -> i32 {
     let result = std::panic::catch_unwind(|| record(&path, &mut io::stdin()));
     let start = match result {
         Ok((start, Err(e))) => {
-            eprintln!("report-gate event: {e}");
+            eprintln!("decidle event: {e}");
             start
         }
         Ok((start, Ok(()))) => start,
         Err(_) => {
-            eprintln!("report-gate event: panic");
+            eprintln!("decidle event: panic");
             false
         }
     };

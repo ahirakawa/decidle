@@ -1,6 +1,6 @@
-//! `report-gate event`: concurrent appends, failure to write, and what is never recorded.
+//! `decidle event`: concurrent appends, failure to write, and what is never recorded.
 
-use report_gate::home::{events, read, state::Kind};
+use decidle::home::{events, read, state::Kind};
 use serde_json::{json, Value};
 use std::fs;
 use std::io::Write;
@@ -14,18 +14,18 @@ static COUNTER: AtomicUsize = AtomicUsize::new(0);
 
 fn temp_home() -> PathBuf {
     let n = COUNTER.fetch_add(1, Ordering::SeqCst);
-    let dir = std::env::temp_dir().join(format!("report-gate-home-event-{}-{n}", std::process::id()));
+    let dir = std::env::temp_dir().join(format!("decidle-home-event-{}-{n}", std::process::id()));
     let _ = fs::remove_dir_all(&dir);
     fs::create_dir_all(&dir).unwrap();
     dir
 }
 
 fn log_of(home: &Path) -> PathBuf {
-    home.join(".local/share/agent-report-gate/events.jsonl")
+    home.join(".local/share/decidle/events.jsonl")
 }
 
 fn hook(home: &Path, input: &str) -> Output {
-    let mut child = Command::new(env!("CARGO_BIN_EXE_report-gate"))
+    let mut child = Command::new(env!("CARGO_BIN_EXE_decidle"))
         .arg("event")
         .env("HOME", home)
         .stdin(Stdio::piped())
@@ -207,13 +207,13 @@ fn session_start_gives_the_home_line_instruction_as_additional_context() {
     };
     let out = hook(&home, &start("startup").to_string());
     assert_eq!(out.status.code(), Some(0));
-    assert_eq!(context(&out), report_gate::home::note::INSTRUCTION);
+    assert_eq!(context(&out), decidle::home::note::INSTRUCTION);
     assert_eq!(lines(&home).len(), 1);
 
     // After a compaction the instruction is given again, but no start line is appended:
     // the same claude keeps running, and a start would hide the session.
     let out = hook(&home, &start("compact").to_string());
-    assert_eq!(context(&out), report_gate::home::note::INSTRUCTION);
+    assert_eq!(context(&out), decidle::home::note::INSTRUCTION);
     assert_eq!(lines(&home).len(), 1);
 
     // When the append fails, the instruction is still given.
@@ -221,7 +221,7 @@ fn session_start_gives_the_home_line_instruction_as_additional_context() {
     fs::create_dir_all(log_of(&home)).unwrap();
     let out = hook(&home, &start("startup").to_string());
     assert_eq!(out.status.code(), Some(0));
-    assert_eq!(context(&out), report_gate::home::note::INSTRUCTION);
+    assert_eq!(context(&out), decidle::home::note::INSTRUCTION);
 }
 
 #[test]
@@ -239,7 +239,7 @@ fn compaction_does_not_hide_a_working_session() {
     let kinds: Vec<Option<Kind>> = loaded.events.iter().map(|e| e.kind).collect();
     assert_eq!(kinds, [Some(Kind::Start), Some(Kind::Prompt)], "compact appended a line");
     let now = loaded.events.last().unwrap().ts_us + 1;
-    let rows = report_gate::home::state::visible(report_gate::home::state::derive(&loaded.events), now);
+    let rows = decidle::home::state::visible(decidle::home::state::derive(&loaded.events), now);
     assert_eq!(rows.len(), 1);
-    assert_eq!(rows[0].st, report_gate::home::state::St::Working);
+    assert_eq!(rows[0].st, decidle::home::state::St::Working);
 }

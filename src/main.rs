@@ -6,7 +6,7 @@ mod render;
 mod transcript;
 mod util;
 
-use report_gate::home;
+use decidle::home;
 
 fn main() {
     let args: Vec<String> = std::env::args().collect();
@@ -21,16 +21,16 @@ fn main() {
         Some("serve") => match config::Config::load() {
             Ok(cfg) if cfg.home_port != 0 => home::server::serve(cfg.home_port),
             Ok(_) => {
-                eprintln!("report-gate serve: config の home_port に 0 は使えない");
+                eprintln!("decidle serve: config の home_port に 0 は使えない");
                 1
             }
             Err(e) => {
-                eprintln!("report-gate serve: {e}");
+                eprintln!("decidle serve: {e}");
                 1
             }
         },
         _ => {
-            eprintln!("usage: report-gate stop | report-gate render <report.json> | report-gate extract [--projects-dir DIR] | report-gate event | report-gate serve");
+            eprintln!("usage: decidle stop | decidle render <report.json> | decidle extract [--projects-dir DIR] | decidle event | decidle serve");
             1
         }
     };

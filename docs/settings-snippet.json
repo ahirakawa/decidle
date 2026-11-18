@@ -5,7 +5,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "~/.claude/hooks/stop_report_gate.sh"
+            "command": "b=\"$HOME/.local/bin/decidle\"; [ -x \"$b\" ] || exit 0; exec \"$b\" stop"
           }
         ]
       }
@@ -16,7 +16,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "b=\"$HOME/.local/bin/report-gate\"; [ -x \"$b\" ] || exit 0; exec \"$b\" event"
+            "command": "b=\"$HOME/.local/bin/decidle\"; [ -x \"$b\" ] || exit 0; exec \"$b\" event"
           }
         ]
       }
@@ -26,7 +26,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "b=\"$HOME/.local/bin/report-gate\"; [ -x \"$b\" ] || exit 0; exec \"$b\" event"
+            "command": "b=\"$HOME/.local/bin/decidle\"; [ -x \"$b\" ] || exit 0; exec \"$b\" event"
           }
         ]
       }
@@ -37,7 +37,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "b=\"$HOME/.local/bin/report-gate\"; [ -x \"$b\" ] || exit 0; exec \"$b\" event"
+            "command": "b=\"$HOME/.local/bin/decidle\"; [ -x \"$b\" ] || exit 0; exec \"$b\" event"
           }
         ]
       }
@@ -47,7 +47,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "b=\"$HOME/.local/bin/report-gate\"; [ -x \"$b\" ] || exit 0; exec \"$b\" event"
+            "command": "b=\"$HOME/.local/bin/decidle\"; [ -x \"$b\" ] || exit 0; exec \"$b\" event"
           }
         ]
       }

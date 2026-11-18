@@ -37,7 +37,9 @@ SELECT
     j->>'report_html',
     try_cast(j->>'background' AS BOOLEAN),
     j->>'attention',
-    j->>'note'
+    j->>'note',
+    CASE WHEN json_type(j->'questions') = 'ARRAY' THEN CAST(j->'questions' AS VARCHAR) END,
+    j->>'report_goal'
 FROM parsed ORDER BY n
 "#;
 
@@ -58,10 +60,12 @@ type Row = (
     Option<bool>,
     Option<String>,
     Option<String>,
+    Option<String>,
+    Option<String>,
 );
 
 fn to_event(r: Row) -> Option<Event> {
-    let (ts, ts_us, session_id, cwd, event, pid, pid_started, report_path, report_title, decisions, resolves, transcript_path, report_html, background, attention, note) = r;
+    let (ts, ts_us, session_id, cwd, event, pid, pid_started, report_path, report_title, decisions, resolves, transcript_path, report_html, background, attention, note, questions, report_goal) = r;
     Some(Event {
         ts: ts?,
         ts_us: ts_us?,
@@ -79,7 +83,17 @@ fn to_event(r: Row) -> Option<Event> {
         background: background.unwrap_or(false),
         attention: Attention::parse(attention.as_deref().unwrap_or_default()),
         note,
+        questions: questions.as_deref().map(parse_questions).unwrap_or_default(),
+        report_goal,
     })
+}
+
+/// The `questions` array of a stop line. Entries that are not strings are dropped.
+fn parse_questions(text: &str) -> Vec<String> {
+    match serde_json::from_str::<Vec<serde_json::Value>>(text) {
+        Ok(v) => v.into_iter().filter_map(|q| q.as_str().map(str::to_string)).collect(),
+        Err(_) => Vec::new(),
+    }
 }
 
 pub fn load(path: &Path) -> Result<Loaded, String> {
@@ -113,6 +127,8 @@ pub fn load(path: &Path) -> Result<Loaded, String> {
                 row.get(13)?,
                 row.get(14)?,
                 row.get(15)?,
+                row.get(16)?,
+                row.get(17)?,
             ))
         })
         .map_err(fail)?;

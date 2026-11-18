@@ -1,6 +1,6 @@
 //! The Home server: /api/sessions on a prepared events.jsonl, the 403 checks, resolve and kill.
 
-use report_gate::home::{events, procinfo, server::{self, Server}};
+use decidle::home::{events, procinfo, server::{self, Server}};
 use serde_json::{json, Value};
 use std::fs;
 use std::io::{Read, Write};
@@ -14,7 +14,7 @@ static COUNTER: AtomicUsize = AtomicUsize::new(0);
 
 fn temp_dir() -> PathBuf {
     let n = COUNTER.fetch_add(1, Ordering::SeqCst);
-    let dir = std::env::temp_dir().join(format!("report-gate-home-api-{}-{n}", std::process::id()));
+    let dir = std::env::temp_dir().join(format!("decidle-home-api-{}-{n}", std::process::id()));
     let _ = fs::remove_dir_all(&dir);
     fs::create_dir_all(&dir).unwrap();
     dir
@@ -31,7 +31,7 @@ fn start(log: &PathBuf) -> (u16, String) {
     std::thread::spawn(move || server.run());
     let (status, page) = request(port, "GET", "/", &[], "");
     assert_eq!(status, 200);
-    let marker = "name=\"report-gate-token\" content=\"";
+    let marker = "name=\"decidle-token\" content=\"";
     let start = page.find(marker).unwrap() + marker.len();
     let token = page[start..start + 64].to_string();
     assert!(token.chars().all(|c| c.is_ascii_hexdigit()), "token {token}");
@@ -75,7 +75,7 @@ fn rows(port: u16) -> Vec<(String, String)> {
 
 fn post(port: u16, path: &str, token: &str, body: &Value) -> (u16, String) {
     let origin = format!("http://127.0.0.1:{port}");
-    request(port, "POST", path, &[("Origin", &origin), ("X-Report-Gate-Token", token)], &body.to_string())
+    request(port, "POST", path, &[("Origin", &origin), ("X-Decidle-Token", token)], &body.to_string())
 }
 
 /// One line per tuple: (session, event, extra fields). Each line is one second after the last.
@@ -113,7 +113,7 @@ fn sessions_states_and_order() {
         ("C", "prompt", n.clone()),
         ("C", "stop", n.clone()),
         ("D", "prompt", n.clone()),
-        ("D", "stop", json!({"report_path": "/work/D/.report-gate/t.report.json", "report_html": "/work/D/.report-gate/t.html", "report_title": "題D", "decisions": 2})),
+        ("D", "stop", json!({"report_path": "/work/D/.decidle/t.report.json", "report_html": "/work/D/.decidle/t.html", "report_title": "題D", "decisions": 2})),
         ("E", "prompt", n.clone()),
         ("E", "stop", n.clone()), // index 10; resolved below
         ("F", "prompt", n.clone()),
@@ -164,7 +164,7 @@ fn sessions_states_and_order() {
     assert_eq!(d["report_title"], "題D");
     assert_eq!(d["decisions"], 2);
     assert_eq!(d["folder"], "D");
-    assert_eq!(d["report_url"], "/report/work/D/.report-gate/t.html");
+    assert_eq!(d["report_url"], "/report/work/D/.decidle/t.html");
 }
 
 #[test]
@@ -189,10 +189,10 @@ fn forged_requests_are_403() {
 
     let cases: Vec<(&str, Vec<(&str, &str)>)> = vec![
         ("no token", vec![("Origin", &good_origin)]),
-        ("wrong token", vec![("Origin", &good_origin), ("X-Report-Gate-Token", "00")]),
-        ("other origin", vec![("Origin", "http://evil.example"), ("X-Report-Gate-Token", &token)]),
-        ("no origin", vec![("X-Report-Gate-Token", &token)]),
-        ("other host", vec![("Host", "evil.example"), ("Origin", &good_origin), ("X-Report-Gate-Token", &token)]),
+        ("wrong token", vec![("Origin", &good_origin), ("X-Decidle-Token", "00")]),
+        ("other origin", vec![("Origin", "http://evil.example"), ("X-Decidle-Token", &token)]),
+        ("no origin", vec![("X-Decidle-Token", &token)]),
+        ("other host", vec![("Host", "evil.example"), ("Origin", &good_origin), ("X-Decidle-Token", &token)]),
     ];
     for (name, headers) in &cases {
         for path in ["/api/resolve", "/api/kill"] {
@@ -210,7 +210,7 @@ fn forged_requests_are_403() {
         port,
         "POST",
         "/api/resolve",
-        &[("Host", &local_host), ("Origin", &format!("http://{local_host}")), ("X-Report-Gate-Token", &token)],
+        &[("Host", &local_host), ("Origin", &format!("http://{local_host}")), ("X-Decidle-Token", &token)],
         &body,
     );
     assert_eq!(status, 200, "{out}");
@@ -409,9 +409,9 @@ fn duplicated_security_headers_are_403() {
     let host = format!("127.0.0.1:{port}");
     let origin = format!("http://{host}");
     let cases: Vec<(&str, Vec<(&str, &str)>)> = vec![
-        ("host twice", vec![("Host", &host), ("Host", &host), ("Origin", &origin), ("X-Report-Gate-Token", &token)]),
-        ("origin twice", vec![("Origin", "http://evil.example"), ("Origin", &origin), ("X-Report-Gate-Token", &token)]),
-        ("token twice", vec![("Origin", &origin), ("X-Report-Gate-Token", "00"), ("x-report-gate-token", &token)]),
+        ("host twice", vec![("Host", &host), ("Host", &host), ("Origin", &origin), ("X-Decidle-Token", &token)]),
+        ("origin twice", vec![("Origin", "http://evil.example"), ("Origin", &origin), ("X-Decidle-Token", &token)]),
+        ("token twice", vec![("Origin", &origin), ("X-Decidle-Token", "00"), ("x-decidle-token", &token)]),
     ];
     for (name, headers) in &cases {
         let (status, _) = request(port, "POST", "/api/resolve", headers, &body);
@@ -424,7 +424,7 @@ fn duplicated_security_headers_are_403() {
 fn only_recorded_report_pages_are_served() {
     let dir = temp_dir();
     // A folder name that needs encoding, to check that the link round-trips through the server.
-    let reports = dir.join("報告 dir/.report-gate");
+    let reports = dir.join("報告 dir/.decidle");
     fs::create_dir_all(reports.join("sub")).unwrap();
     fs::write(reports.join("t.html"), "<p>recorded</p>").unwrap();
     fs::write(reports.join("other.html"), "<p>not recorded</p>").unwrap();
@@ -534,4 +534,53 @@ fn stops_are_split_by_whether_the_human_has_something_to_do() {
         ("work".into(), "unknown".into(), false, Value::Null),
     ];
     assert_eq!(got, want);
+}
+
+#[test]
+fn rows_carry_questions_goal_and_times() {
+    let dir = temp_dir();
+    let log = dir.join("events.jsonl");
+    let n = json!({});
+    let report = json!({
+        "report_path": "/work/Q/.decidle/t.report.json", "report_html": "/work/Q/.decidle/t.html",
+        "report_title": "題Q", "decisions": 2,
+        "questions": ["終了ボタンの確認を先にするか", "ポートを 7878 のままにするか"],
+        "report_goal": "Home で問いを読めるようにしたい",
+    });
+    let lines: Vec<(&str, &str, Value)> = vec![
+        ("Q", "start", n.clone()),
+        ("Q", "prompt", n.clone()),
+        ("Q", "stop", report),
+        // Written before questions were recorded, and without a start line.
+        ("O", "prompt", n.clone()),
+        ("O", "stop", json!({"report_title": "題O", "decisions": 1, "questions": "not an array"})),
+        // A newer start clears what the previous stop carried.
+        ("R", "start", n.clone()),
+        ("R", "prompt", n.clone()),
+        ("R", "stop", json!({"report_title": "題R", "decisions": 1, "questions": ["前の問い"], "report_goal": "前の目的"})),
+        ("R", "start", n.clone()),
+        ("R", "prompt", n.clone()),
+    ];
+    let ts = write_log(&log, &lines, SystemTime::now() - Duration::from_secs(600));
+    let (port, _) = start(&log);
+    let all = sessions(port);
+    let by = |sid: &str| all["sessions"].as_array().unwrap().iter().find(|r| r["session_id"] == sid).unwrap().clone();
+
+    let q = by("Q");
+    assert_eq!(q["questions"], json!(["終了ボタンの確認を先にするか", "ポートを 7878 のままにするか"]));
+    assert_eq!(q["report_goal"], "Home で問いを読めるようにしたい");
+    assert_eq!(q["started"], json!(ts[0]));
+    assert_eq!(q["last_stop"], json!(ts[2]));
+
+    let o = by("O");
+    assert_eq!(o["questions"], json!([]));
+    assert_eq!(o["report_goal"], Value::Null);
+    assert_eq!(o["started"], Value::Null);
+    assert_eq!(o["decisions"], 1);
+
+    let r = by("R");
+    assert_eq!(r["state"], "working");
+    assert_eq!(r["questions"], json!([]));
+    assert_eq!(r["report_goal"], Value::Null);
+    assert_eq!(r["started"], json!(ts[8]));
 }

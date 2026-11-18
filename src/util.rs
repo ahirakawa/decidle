@@ -37,7 +37,7 @@ pub fn home() -> PathBuf {
 
 /// Where the gate keeps its log and per-session state. Not configurable on purpose.
 pub fn data_dir() -> PathBuf {
-    home().join(".local/share/agent-report-gate")
+    home().join(".local/share/decidle")
 }
 
 fn private_dir(path: &Path) -> io::Result<()> {

@@ -1,4 +1,4 @@
-//! `report-gate serve`: a small HTTP server on 127.0.0.1 for the Home page.
+//! `decidle serve`: a small HTTP server on 127.0.0.1 for the Home page.
 
 use serde::Deserialize;
 use serde_json::{json, Value};
@@ -15,7 +15,7 @@ use super::read;
 use super::state::{self, Kind, Session, St};
 
 const PAGE: &str = include_str!("page.html");
-const TOKEN_HEADER: &str = "x-report-gate-token";
+const TOKEN_HEADER: &str = "x-decidle-token";
 const MAX_HEAD_BYTES: u64 = 16 * 1024;
 const MAX_BODY_BYTES: usize = 4096;
 const IO_TIMEOUT: Duration = Duration::from_secs(5);
@@ -80,7 +80,7 @@ fn same_secret(a: &str, b: &str) -> bool {
     a.len() == b.len() && a.bytes().zip(b.bytes()).fold(0u8, |acc, (x, y)| acc | (x ^ y)) == 0
 }
 
-/// The link to a report page that report-gate stop wrote: `/report` followed by the absolute
+/// The link to a report page that decidle stop wrote: `/report` followed by the absolute
 /// path, with every byte other than unreserved characters and `/` percent-encoded. A request is
 /// served only when its raw path equals the link of a recorded page, byte for byte, so `..`,
 /// other encodings and extra characters never match.
@@ -131,8 +131,11 @@ fn row(s: &Session) -> Value {
         "folder": folder,
         "cwd": s.cwd,
         "state": state_name(s),
+        "started": s.started,
         "last_stop": s.last_stop,
         "report_title": s.report_title,
+        "report_goal": s.report_goal,
+        "questions": s.questions,
         "report_url": s.report_html.as_deref().and_then(report_link),
         "decisions": s.decisions,
         "attention": s.attention.as_str(),
@@ -380,16 +383,16 @@ impl Server {
     }
 }
 
-/// `report-gate serve`. Stops with an error when the port is taken.
+/// `decidle serve`. Stops with an error when the port is taken.
 pub fn serve(port: u16) -> i32 {
     match Server::bind(port, events::events_path()) {
         Ok(server) => {
-            eprintln!("report-gate serve: http://127.0.0.1:{}/", server.port());
+            eprintln!("decidle serve: http://127.0.0.1:{}/", server.port());
             server.run();
             0
         }
         Err(e) => {
-            eprintln!("report-gate serve: 127.0.0.1:{port} で待ち受けられない: {e}");
+            eprintln!("decidle serve: 127.0.0.1:{port} で待ち受けられない: {e}");
             1
         }
     }

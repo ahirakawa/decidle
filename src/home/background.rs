@@ -1,6 +1,6 @@
 //! Whether a stopping session still waits on work running in the background: a subagent or a
 //! command started in the background whose result has not come back, or a ScheduleWakeup that
-//! has not fired. `report-gate stop` records this on the stop line, and the Home page shows such
+//! has not fired. `decidle stop` records this on the stop line, and the Home page shows such
 //! a session as working in the background, without the resolve and kill buttons.
 //!
 //! The rules follow the lines Claude Code writes to the transcript (seen in version 2.1.32x).

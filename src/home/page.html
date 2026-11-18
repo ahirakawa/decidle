@@ -2,7 +2,7 @@
 <html lang="ja">
 <head>
 <meta charset="utf-8">
-<meta name="report-gate-token" content="__TOKEN__">
+<meta name="decidle-token" content="__TOKEN__">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Home</title>
 <style>
@@ -58,6 +58,8 @@
   .say { margin-top: 8px; font-size: 17px; font-weight: 700; line-height: 1.4; padding-left: 10px; border-left: 3px solid var(--c); word-break: break-word; }
   .say.missing { font-size: 13px; font-weight: 400; color: var(--sub); border-left-style: dashed; border-left-color: var(--unknown); }
   .decs { margin-top: 8px; font-size: 15px; font-weight: 700; color: var(--decide); }
+  ul.decs { padding-left: 1.2em; margin-bottom: 0; }
+  ul.decs li + li { margin-top: 2px; }
   .report { margin-top: 8px; padding: 8px 10px; background: var(--bg); border-radius: 4px; font-size: 13px; word-break: break-word; }
   .report a { color: var(--fg); font-weight: 600; }
   .resolve { display: block; width: 100%; margin-top: 10px; font: inherit; font-size: 15px; font-weight: 700; padding: 9px; border-radius: 4px; border: none; background: var(--fg); color: var(--panel); cursor: pointer; }
@@ -89,7 +91,7 @@
 </head>
 <body>
 <div class="wrap">
-  <header><span class="brand">REPORT-GATE HOME</span><button class="theme" id="theme"></button></header>
+  <header><span class="brand">DECIDLE HOME</span><button class="theme" id="theme"></button></header>
   <div id="err" hidden></div>
   <div class="hero" id="hero"></div>
   <div class="cols" id="main"></div>
@@ -97,7 +99,7 @@
 </div>
 <script>
 "use strict";
-const TOKEN = document.querySelector('meta[name="report-gate-token"]').content;
+const TOKEN = document.querySelector('meta[name="decidle-token"]').content;
 // The kind of a row. A stopped row splits by attention: need (yes), noneed (no), unknown.
 const kind = s => s.state === "stopped" ? ({ yes: "need", no: "noneed" })[s.attention] || "unknown" : s.state;
 const LABEL = {
@@ -141,7 +143,7 @@ async function post(path, s) {
   try {
     const res = await fetch(path, {
       method: "POST",
-      headers: { "Content-Type": "application/json", "X-Report-Gate-Token": TOKEN },
+      headers: { "Content-Type": "application/json", "X-Decidle-Token": TOKEN },
       body: JSON.stringify({ session_id: s.session_id, resolves: s.last_stop }),
     });
     const body = await res.json().catch(() => ({}));
@@ -151,8 +153,16 @@ async function post(path, s) {
   }
   refresh();
 }
+// The start time tells apart sessions in the same folder. Old logs without a start line
+// fall back to the session id.
+function startLabel(s) {
+  const t = Date.parse(s.started || "");
+  if (isNaN(t)) return "#" + s.session_id.slice(0, 8);
+  const d = new Date(t), now = new Date(), hm = d.getHours() + ":" + String(d.getMinutes()).padStart(2, "0");
+  return "開始 " + (d.toDateString() === now.toDateString() ? hm : (d.getMonth() + 1) + "/" + d.getDate() + " " + hm);
+}
 function kill(s) {
-  if (confirm(s.folder + "(#" + s.session_id.slice(0, 8) + ")の claude を終了する。よいか。")) post("/api/kill", s);
+  if (confirm(s.folder + "(" + startLabel(s) + ")の claude を終了する。よいか。")) post("/api/kill", s);
 }
 
 const THEMES = ["auto", "light", "dark"], TLABEL = { auto: "画面: 自動", light: "画面: 明るい", dark: "画面: 暗い" };
@@ -183,13 +193,21 @@ function tick() {
 
 function meta(s) {
   const dup = sessions.filter(x => x.folder === s.folder).length > 1;
-  return h("div", { class: "meta" }, h("span", { class: dup ? "dup" : "" }, "#" + s.session_id.slice(0, 8)));
+  return h("div", { class: "meta", title: s.session_id }, h("span", { class: dup ? "dup" : "" }, startLabel(s)));
 }
 function say(s) {
   if (s.state === "permission") return h("div", { class: "say" }, "ターミナルで許可を出してほしい");
   if (s.note) return h("div", { class: "say" }, s.note);
   if (canClose(s)) return h("div", { class: "say missing" }, MISSING);
   return null;
+}
+// The questions the agent wrote in the report (40 characters or fewer each). Lines written
+// before questions were recorded only have the count.
+function decs(s) {
+  if (!(s.report_title && s.decisions > 0)) return null;
+  const qs = s.questions || [];
+  if (!qs.length) return h("div", { class: "decs" }, "決めてほしいこと " + s.decisions + " 件");
+  return h("ul", { class: "decs" }, qs.map(q => h("li", {}, q)));
 }
 function reportLink(s) {
   return s.report_url ? h("a", { href: s.report_url, title: "報告のページを開く" }, s.report_title) : s.report_title;
@@ -204,7 +222,7 @@ function item(s) {
       h("div", { class: "folder", title: s.cwd }, s.folder),
       meta(s),
       say(s),
-      s.report_title && s.decisions > 0 ? h("div", { class: "decs" }, "決めてほしいこと " + s.decisions + " 件") : null,
+      decs(s),
       s.report_title ? h("div", { class: "report" }, "報告: ", reportLink(s)) : null,
       canClose(s) ? h("button", { class: "resolve", onclick: () => post("/api/resolve", s) }, quiet ? "解決" : "見た・解決") : null),
     canClose(s) ? h("button", { class: "kill", onclick: () => kill(s) }, "終了…") : null);

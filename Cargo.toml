@@ -1,5 +1,5 @@
 [package]
-name = "report-gate"
+name = "decidle"
 version = "0.1.0"
 edition = "2021"
 

@@ -1,13 +1,13 @@
 //! The one line an agent writes at the end of every reply for the Home page:
 //! `Home: 要 <note>` (the human has something to do) or `Home: 不要 <note>` (nothing to do).
-//! `report-gate stop` keeps only this line; the rest of the reply is never stored.
+//! `decidle stop` keeps only this line; the rest of the reply is never stored.
 //! The SessionStart hook gives the agent `INSTRUCTION`, so the human's CLAUDE.md need not change.
 
 /// Longest note, in characters.
 pub const NOTE_MAX_CHARS: usize = 60;
 
-/// What `report-gate event` adds to the context at session start (and after a compaction).
-pub const INSTRUCTION: &str = "## Home への一言（report-gate）\n\
+/// What `decidle event` adds to the context at session start (and after a compaction).
+pub const INSTRUCTION: &str = "## Home への一言（decidle）\n\
 返事の最後の 1 行を、Home ページ用の一言にする。形は「Home: 要 <一言>」か「Home: 不要 <一言>」。\n\
 - 要: 人の対応（判断、確認、返事、許可）が要る。不要: 要らない（完了の報告や、裏の作業を待っているだけのとき）。\n\
 - 一言は 60 字以内で、何を待っているか、何を終えたかを書く。例: 「Home: 要 レビューを待っている」「Home: 不要 テストの完了を報告」\n\

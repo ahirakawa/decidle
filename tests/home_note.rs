@@ -1,6 +1,6 @@
 //! The agent's `Home:` line at the end of a reply.
 
-use report_gate::home::note::{self, Attention};
+use decidle::home::note::{self, Attention};
 
 #[test]
 fn reads_the_last_line_in_the_form() {

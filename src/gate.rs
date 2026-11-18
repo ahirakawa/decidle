@@ -9,9 +9,9 @@ use crate::check::{check_report, collect_facts, should_check, Report};
 use crate::config::Config;
 use crate::render::{file_url, render};
 use crate::transcript::{self, Kind};
-use report_gate::home::background;
-use report_gate::home::events::{self as home_events, StopInfo, StopReport};
-use report_gate::home::note;
+use decidle::home::background;
+use decidle::home::events::{self as home_events, StopInfo, StopReport};
+use decidle::home::note;
 
 use crate::util::{append_line, clip, data_dir, now_iso, read_regular, write_atomic};
 
@@ -245,14 +245,14 @@ fn record_stop(target: &Option<StopTarget>, report: Option<&StopReport>) {
     let background = match background::pending(Path::new(&t.transcript_path)) {
         Ok(p) => p.waiting(),
         Err(e) => {
-            eprintln!("report-gate: 裏の作業を確かめるための会話記録を読めない: {e}");
+            eprintln!("decidle: 裏の作業を確かめるための会話記録を読めない: {e}");
             false
         }
     };
     let (attention, note) = note::parse(&last_reply(t));
     let info = StopInfo { background, attention, note };
     if let Err(e) = home_events::append_stop(&home_events::events_path(), &t.session_id, &t.cwd, report, &info) {
-        eprintln!("report-gate: events.jsonl に停止を書けない: {e}");
+        eprintln!("decidle: events.jsonl に停止を書けない: {e}");
     }
 }
 
@@ -275,7 +275,7 @@ pub fn run_stop() {
     let target = stop_target(&raw);
     // Every way out of this function except a block lets the agent stop, so each records a stop,
     // and records it before printing, so that a failed print cannot skip it.
-    if std::env::var("REPORT_GATE_MODE").is_ok_and(|m| m == "off") {
+    if std::env::var("DECIDLE_MODE").is_ok_and(|m| m == "off") {
         record_stop(&target, None);
         return;
     }
@@ -283,7 +283,7 @@ pub fn run_stop() {
         Ok(c) => c,
         Err(e) => {
             record_stop(&target, None);
-            eprintln!("report-gate: {e}");
+            eprintln!("decidle: {e}");
             return;
         }
     };
@@ -399,9 +399,9 @@ fn evaluate(input: &HookInput, cfg: &Config, data_dir: &Path, session_id: &str) 
             let html_path = write_page(report, paths, &issues)?;
             written_html = Some(html_path.clone());
             portal_error = show_in_portal(&html_path, cfg);
-            format!("report-gate: 報告のページ {}", file_url(&html_path))
+            format!("decidle: 報告のページ {}", file_url(&html_path))
         }
-        None => "report-gate: 報告のページは作れなかった。".to_string(),
+        None => "decidle: 報告のページは作れなかった。".to_string(),
     };
     if issues.is_empty() {
         log(data_dir, session_id, "pass", &issues, state.rounds, portal_error.as_deref());
@@ -414,6 +414,10 @@ fn evaluate(input: &HookInput, cfg: &Config, data_dir: &Path, session_id: &str) 
         html,
         title: clip(&report.title, 200),
         decisions: report.decisions.len(),
+        // Written by the agent for the Home card, not prompt or reply text. A report that
+        // ran out of rounds may still carry a long question, so clip it here as well.
+        questions: report.decisions.iter().map(|d| clip(d.question.trim(), cfg.question_max_chars)).collect(),
+        goal: clip(report.goal.trim(), 200),
     });
     Ok(Verdict::Stop(report, Some(json!({ "systemMessage": message }).to_string())))
 }
@@ -423,11 +427,11 @@ fn save_state(path: &Path, state: &State) -> Result<(), String> {
     write_atomic(path, text.as_bytes(), true).map_err(|e| format!("状態を保存できない: {e}"))
 }
 
-/// `report-gate render <report.json>`: writes the page without waiting for the Stop hook,
+/// `decidle render <report.json>`: writes the page without waiting for the Stop hook,
 /// so that an agent can show it in a browser before it stops. Only the location and the JSON shape are checked here.
 pub fn run_render(args: &[String]) -> i32 {
     let [json_path] = args else {
-        eprintln!("usage: report-gate render <report.json>");
+        eprintln!("usage: decidle render <report.json>");
         return 1;
     };
     let result = Config::load().and_then(|cfg| {
@@ -441,7 +445,7 @@ pub fn run_render(args: &[String]) -> i32 {
             0
         }
         Err(e) => {
-            eprintln!("report-gate: {e}");
+            eprintln!("decidle: {e}");
             1
         }
     }
