@@ -1001,3 +1001,115 @@ fn portal_is_off_by_default() {
     assert_eq!(line["verdict"], "pass");
     assert!(line["error"].is_null(), "{line}");
 }
+
+// ---- Codex CLI. The transcript and hook input are dummies shaped like Codex CLI 0.169's. ----
+
+fn codex_item(payload: Value, k: usize) -> Value {
+    json!({"timestamp": format!("2026-11-18T00:00:{:02}.000Z", k % 60), "ordinal": k, "type": "response_item", "payload": payload})
+}
+
+/// A Codex transcript with an earlier turn t0 (holding `earlier`) and the current turn t1 (holding `items`).
+fn codex_transcript(sb: &Sandbox, items: &[Value], earlier: &[Value]) -> PathBuf {
+    let dir = sb.home.join(".codex/sessions/2026/11/18");
+    fs::create_dir_all(&dir).unwrap();
+    let path = dir.join("rollout-2026-11-18T00-00-00-dummy.jsonl");
+    let cwd = sb.cwd.to_string_lossy().into_owned();
+    let mut lines = vec![json!({"timestamp": "2026-11-18T00:00:00.000Z", "ordinal": 0, "type": "session_meta",
+        "payload": {"id": "c1", "session_id": "c1", "cwd": cwd, "originator": "codex_tui", "source": "cli"}})];
+    let mut k = 1;
+    for (turn, prompt, body) in [("t0", "前の依頼", earlier), ("t1", "作業して", items)] {
+        lines.push(json!({"timestamp": "2026-11-18T00:00:01.000Z", "ordinal": k, "type": "event_msg", "payload": {"type": "task_started", "turn_id": turn}}));
+        lines.push(json!({"timestamp": "2026-11-18T00:00:01.000Z", "ordinal": k + 1, "type": "turn_context", "payload": {"turn_id": turn, "cwd": cwd}}));
+        lines.push(codex_item(json!({"type": "message", "role": "developer", "content": [{"type": "input_text", "text": "指示"}]}), k + 2));
+        lines.push(codex_item(json!({"type": "message", "role": "user", "content": [{"type": "input_text", "text": prompt}]}), k + 3));
+        k += 4;
+        for b in body.iter() {
+            lines.push(codex_item(b.clone(), k));
+            k += 1;
+        }
+    }
+    let text: String = lines.iter().map(|l| format!("{l}\n")).collect();
+    fs::write(&path, text).unwrap();
+    path
+}
+
+fn apply_patch(files: &[&str]) -> Value {
+    let mut patch = String::from("*** Begin Patch\n");
+    for f in files {
+        patch.push_str(&format!("*** Update File: {f}\n@@\n-a\n+b\n"));
+    }
+    patch.push_str("*** End Patch\n");
+    json!({"type": "custom_tool_call", "name": "apply_patch", "input": patch, "call_id": "p"})
+}
+
+fn codex_exec(cmd: &str) -> Value {
+    json!({"type": "custom_tool_call", "name": "exec", "input": cmd, "call_id": "e"})
+}
+
+fn codex_stop(sb: &Sandbox, t: &Path, reply: &str) -> String {
+    let input = json!({
+        "session_id": "c1", "turn_id": "t1", "transcript_path": t, "cwd": sb.cwd,
+        "hook_event_name": "Stop", "model": "dummy-model", "permission_mode": "default",
+        "stop_hook_active": false, "last_assistant_message": reply,
+    });
+    sb.run_raw(&input.to_string(), None)
+}
+
+#[test]
+fn codex_small_turn_stops_and_records_the_home_line() {
+    let sb = Sandbox::new();
+    let t = codex_transcript(&sb, &[codex_exec("ls")], &[]);
+    assert_eq!(codex_stop(&sb, &t, "見た。\nHome: 不要 一覧を見た"), "");
+    let line = &sb.events()[0];
+    assert_eq!((line["session_id"].as_str(), line["attention"].as_str(), line["note"].as_str()), (Some("c1"), Some("no"), Some("一覧を見た")));
+}
+
+#[test]
+fn codex_patch_without_report_is_blocked_in_codex_form() {
+    let sb = Sandbox::new();
+    let f = sb.file("notes.md");
+    let t = codex_transcript(&sb, &[apply_patch(&["notes.md"])], &[]);
+    let out = codex_stop(&sb, &t, "直した。");
+    assert!(reason(&out).contains("報告の JSON が書かれていない"), "{out}");
+    assert!(sb.events().is_empty());
+    assert!(Path::new(&f).exists());
+}
+
+#[test]
+fn codex_report_written_with_apply_patch_passes() {
+    let sb = Sandbox::new();
+    sb.file("notes.md");
+    sb.report(&report(json!([]), json!([]), notes()));
+    let patch = json!({"type": "custom_tool_call", "name": "apply_patch", "call_id": "p",
+        "input": "*** Begin Patch\n*** Update File: notes.md\n@@\n+b\n*** Add File: .decidle/task.report.json\n+{}\n*** End Patch\n"});
+    let t = codex_transcript(&sb, &[patch], &[]);
+    // systemMessage is a field Codex shares with Claude Code.
+    passed(&codex_stop(&sb, &t, "終わった。決めてほしいことはない。"));
+    let line = &sb.events()[0];
+    assert_eq!(line["report_title"], "設定の修正");
+    assert!(sb.page().contains("設定の修正"));
+}
+
+#[test]
+fn codex_maestri_ask_through_exec_asks_for_a_report() {
+    let sb = Sandbox::new();
+    let t = codex_transcript(&sb, &[codex_exec("maestri ask \"Terminal #2\" 'hi'")], &[]);
+    assert!(reason(&codex_stop(&sb, &t, "送った。")).contains("報告の JSON が書かれていない"));
+    // A JSON argv with a shell runs the last item.
+    let sb = Sandbox::new();
+    let call = json!({"type": "function_call", "name": "shell", "call_id": "s",
+        "arguments": json!({"command": ["bash", "-lc", "maestri ask x y"]}).to_string()});
+    let t = codex_transcript(&sb, &[call], &[]);
+    assert!(reason(&codex_stop(&sb, &t, "送った。")).contains("報告の JSON が書かれていない"));
+}
+
+#[test]
+fn codex_earlier_turn_and_block_feedback_do_not_count() {
+    let sb = Sandbox::new();
+    sb.file("a.md");
+    sb.file("b.md");
+    // Edits in the earlier turn, and the block reason Codex records as a user message.
+    let feedback = json!({"type": "message", "role": "user", "content": [{"type": "input_text", "text": "報告が決まりに合っていない。次の点を直すこと。"}]});
+    let t = codex_transcript(&sb, &[feedback], &[apply_patch(&["a.md", "b.md"])]);
+    assert_eq!(codex_stop(&sb, &t, "返事だけ。"), "");
+}

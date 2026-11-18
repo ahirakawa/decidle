@@ -108,15 +108,16 @@ pub fn collect_facts(entries: &[Entry], start: usize, cwd: &str, cfg: &Config) -
             if !cfg.edit_tools.contains(&t.name) {
                 continue;
             }
-            let Some(p) = &t.file_path else { continue };
-            let abs = absolute(p, cwd);
-            if abs.contains(&report_dir) && abs.ends_with(&cfg.report_suffix) {
-                report_file = Some(abs);
-                continue;
-            }
-            let ignored = cfg.ignore_path_patterns.iter().any(|pat| abs.contains(pat.as_str()));
-            if !ignored && Path::new(&abs).exists() && !edited_files.contains(&abs) {
-                edited_files.push(abs);
+            for p in &t.file_paths {
+                let abs = absolute(p, cwd);
+                if abs.contains(&report_dir) && abs.ends_with(&cfg.report_suffix) {
+                    report_file = Some(abs);
+                    continue;
+                }
+                let ignored = cfg.ignore_path_patterns.iter().any(|pat| abs.contains(pat.as_str()));
+                if !ignored && Path::new(&abs).exists() && !edited_files.contains(&abs) {
+                    edited_files.push(abs);
+                }
             }
         }
     }

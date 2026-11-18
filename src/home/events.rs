@@ -12,6 +12,7 @@ use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use super::note::{self, Attention};
+use super::agent;
 use super::procinfo;
 
 /// How long a hook waits for the lock before giving up. Losing one line is better than
@@ -259,6 +260,8 @@ struct HookInput {
     source: Option<String>,
     notification_type: Option<String>,
     message: Option<String>,
+    /// Codex only; see agent.rs.
+    turn_id: Option<String>,
 }
 
 fn is_permission(input: &HookInput) -> bool {
@@ -278,12 +281,18 @@ fn line_for(input: &HookInput) -> Option<Map<String, Value>> {
         "SessionStart" => "start",
         "UserPromptSubmit" => "prompt",
         "Notification" if is_permission(input) => "permission",
+        // Codex asks for approval with this hook (Claude Code has it too).
+        "PermissionRequest" => "permission",
+        // Codex: the turn was interrupted, also when the human denied an approval. No Stop follows.
+        "Interrupt" => "interrupt",
         "SessionEnd" => "end",
         _ => return None,
     };
     let mut m = base(session_id, cwd, event);
     if event == "start" {
-        let found = procinfo::find_claude_ancestor();
+        let agent = agent::detect(&json!({"transcript_path": input.transcript_path, "turn_id": input.turn_id}));
+        m.insert("agent".into(), json!(agent.as_str()));
+        let found = procinfo::find_ancestor(agent.process_name());
         m.insert("pid".into(), json!(found.map(|(pid, _)| pid)));
         m.insert("pid_started".into(), json!(found.map(|(_, started)| started)));
         m.insert("transcript_path".into(), json!(input.transcript_path));

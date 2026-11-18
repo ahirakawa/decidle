@@ -88,12 +88,24 @@ pub fn info(_pid: i64) -> Option<ProcInfo> {
     None
 }
 
-fn named_claude(p: &ProcInfo) -> bool {
-    p.names.iter().any(|n| n == CLAUDE_NAME)
+pub const CODEX_NAME: &str = "codex";
+
+fn named(p: &ProcInfo, name: &str) -> bool {
+    p.names.iter().any(|n| n == name)
+}
+
+fn named_agent(p: &ProcInfo) -> bool {
+    named(p, CLAUDE_NAME) || named(p, CODEX_NAME)
 }
 
 /// The nearest ancestor of this process named claude, as (pid, start time).
 pub fn find_claude_ancestor() -> Option<(i64, i64)> {
+    find_ancestor(CLAUDE_NAME)
+}
+
+/// The nearest ancestor of this process with the given name (claude or codex), as (pid, start time).
+/// Codex runs a hook as its own child; Claude Code runs it through a shell.
+pub fn find_ancestor(name: &str) -> Option<(i64, i64)> {
     // SAFETY: getppid has no preconditions.
     let mut pid = unsafe { libc::getppid() } as i64;
     for _ in 0..MAX_DEPTH {
@@ -101,7 +113,7 @@ pub fn find_claude_ancestor() -> Option<(i64, i64)> {
             return None;
         }
         let p = info(pid)?;
-        if named_claude(&p) {
+        if named(&p, name) {
             return Some((pid, p.started));
         }
         pid = p.ppid;
@@ -109,7 +121,7 @@ pub fn find_claude_ancestor() -> Option<(i64, i64)> {
     None
 }
 
-/// Whether `pid` is still a claude process that started at `started`.
+/// Whether `pid` is still a claude or codex process that started at `started`.
 pub fn is_same_claude(pid: i64, started: i64) -> bool {
-    pid > 1 && info(pid).is_some_and(|p| named_claude(&p) && p.started == started)
+    pid > 1 && info(pid).is_some_and(|p| named_agent(&p) && p.started == started)
 }

@@ -27,7 +27,7 @@ pub fn worked_since(path: &Path, stop_us: i64) -> Result<bool, String> {
     let mut newest: Option<i64> = None;
     for line in buf.split(|c| *c == b'\n') {
         let Ok(v) = serde_json::from_slice::<Value>(line) else { continue };
-        if !matches!(v.get("type").and_then(Value::as_str), Some("user" | "assistant")) {
+        if !is_conversation(&v) {
             continue;
         }
         if let Some(t) = v.get("timestamp").and_then(Value::as_str).and_then(parse_rfc3339_us) {
@@ -37,5 +37,23 @@ pub fn worked_since(path: &Path, stop_us: i64) -> Result<bool, String> {
     match newest {
         Some(t) => Ok(t > stop_us),
         None => Err(format!("{}: 会話の行が見つからない", path.display())),
+    }
+}
+
+/// A user or assistant entry. Claude Code: `type` user or assistant. Codex: a `response_item`
+/// that is a user or assistant message, a tool call or its output, or a message between agents.
+fn is_conversation(v: &Value) -> bool {
+    match v.get("type").and_then(Value::as_str) {
+        Some("user" | "assistant") => true,
+        Some("response_item") => {
+            let p = v.get("payload");
+            match p.and_then(|p| p.get("type")).and_then(Value::as_str) {
+                Some("message") => matches!(p.and_then(|p| p.get("role")).and_then(Value::as_str), Some("user" | "assistant")),
+                Some("function_call" | "function_call_output" | "custom_tool_call" | "custom_tool_call_output"
+                    | "local_shell_call" | "agent_message") => true,
+                _ => false,
+            }
+        }
+        _ => false,
     }
 }

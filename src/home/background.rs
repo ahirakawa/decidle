@@ -18,6 +18,11 @@
 //!   `scheduledFor`. It ends at a `system` line with `subtype` = `"scheduled_task_fire"`, or at a
 //!   `ScheduleWakeup` call with `stop` = true.
 //!
+//! Codex CLI (seen in version 0.169): a `response_item` line whose payload is a `function_call`
+//! named `spawn_agent` starts a subagent. It counts as done at an `agent_message` payload (the
+//! subagent's answer to the parent) or a `function_call` named `close_agent`. The session waits
+//! while there are more starts than ends. Stopping without waiting was not tried; see the spec.
+//!
 //! The whole transcript is read, not only the last turn: a subagent started in an earlier turn
 //! can still be running.
 
@@ -30,7 +35,10 @@ use std::path::Path;
 const MAX_TRANSCRIPT_BYTES: u64 = 256 * 1024 * 1024;
 
 /// Substrings that a line must contain to matter. Other lines are not parsed.
-const MARKERS: [&str; 8] = [
+const MARKERS: [&str; 11] = [
+    "spawn_agent",
+    "close_agent",
+    "agent_message",
     "async_launched",
     "backgroundTaskId",
     "task-notification",
@@ -95,12 +103,27 @@ pub fn scan<'a>(lines: impl IntoIterator<Item = &'a str>) -> Pending {
     let mut wakeup_calls: HashSet<String> = HashSet::new();
     let mut stop_calls: HashSet<String> = HashSet::new();
     let mut wakeup = false;
+    // Codex: subagents started and subagents that reported back or were closed.
+    let (mut spawned, mut finished) = (0usize, 0usize);
     for line in lines {
         if !MARKERS.iter().any(|m| line.contains(m)) {
             continue;
         }
         let Ok(v) = serde_json::from_str::<Value>(line) else { continue };
         if v.get("isSidechain").and_then(Value::as_bool) == Some(true) {
+            continue;
+        }
+        if v.get("type").and_then(Value::as_str) == Some("response_item") {
+            let p = v.get("payload");
+            match p.and_then(|p| p.get("type")).and_then(Value::as_str) {
+                Some("function_call") => match p.and_then(|p| p.get("name")).and_then(Value::as_str) {
+                    Some("spawn_agent") => spawned += 1,
+                    Some("close_agent") => finished += 1,
+                    _ => {}
+                },
+                Some("agent_message") => finished += 1,
+                _ => {}
+            }
             continue;
         }
         let mut done = Vec::new();
@@ -167,7 +190,7 @@ pub fn scan<'a>(lines: impl IntoIterator<Item = &'a str>) -> Pending {
             running.remove(&id);
         }
     }
-    Pending { tasks: running.len(), wakeup }
+    Pending { tasks: running.len() + spawned.saturating_sub(finished), wakeup }
 }
 
 /// Reads the transcript and applies the rules. Lines that are not UTF-8 are skipped.

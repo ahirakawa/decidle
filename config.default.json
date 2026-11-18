@@ -32,7 +32,8 @@
   "edit_tools": [
     "Edit",
     "Write",
-    "NotebookEdit"
+    "NotebookEdit",
+    "apply_patch"
   ],
   "edited_files_threshold": 3,
   "tool_call_threshold": 20,

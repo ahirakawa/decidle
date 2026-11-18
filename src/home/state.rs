@@ -29,6 +29,8 @@ pub enum Kind {
     Resolved,
     Kill,
     End,
+    /// Codex: a turn was interrupted (also when the human denied an approval).
+    Interrupt,
 }
 
 impl Kind {
@@ -41,6 +43,7 @@ impl Kind {
             "resolved" => Kind::Resolved,
             "kill" => Kind::Kill,
             "end" => Kind::End,
+            "interrupt" => Kind::Interrupt,
             _ => return None,
         })
     }
@@ -67,6 +70,8 @@ pub struct Event {
     /// stop only: the agent's `Home:` line. Missing on old lines, which reads as Unknown.
     pub attention: Attention,
     pub note: Option<String>,
+    /// start only: claude or codex.
+    pub agent: Option<String>,
     /// stop only: the questions of the report's decisions, and its goal.
     pub questions: Vec<String>,
     pub report_goal: Option<String>,
@@ -93,6 +98,8 @@ pub struct Session {
     pub report_goal: Option<String>,
     /// ts of the latest start line (startup, resume or clear). None if the log has none.
     pub started: Option<String>,
+    /// From the latest start line: claude or codex. None on old lines.
+    pub agent: Option<String>,
     pub pid: Option<i64>,
     pub pid_started: Option<i64>,
     pub transcript_path: Option<String>,
@@ -122,6 +129,7 @@ pub fn step(acc: &Session, ev: &Event) -> Session {
             next.questions = Vec::new();
             next.report_goal = None;
             next.started = Some(ev.ts.clone());
+            next.agent = ev.agent.clone();
             next.pid = ev.pid;
             next.pid_started = ev.pid_started;
             next.transcript_path = ev.transcript_path.clone();
@@ -144,6 +152,8 @@ pub fn step(acc: &Session, ev: &Event) -> Session {
         Some(Kind::Resolved) if current_stop(acc, &ev.resolves) => next.st = St::Resolved,
         Some(Kind::Kill) if current_stop(acc, &ev.resolves) => next.st = St::Ended,
         Some(Kind::End) => next.st = St::Ended,
+        // The turn ended without a Stop; the agent waits for the next prompt, like after start.
+        Some(Kind::Interrupt) if matches!(acc.st, St::Working | St::Permission | St::Background) => next.st = St::Idle,
         _ => {}
     }
     next.session_id = ev.session_id.clone();

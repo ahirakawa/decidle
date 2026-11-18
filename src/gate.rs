@@ -25,6 +25,8 @@ struct HookInput {
     transcript_path: Option<String>,
     cwd: Option<String>,
     prompt_id: Option<String>,
+    /// Codex: the turn, in place of prompt_id.
+    turn_id: Option<String>,
     last_assistant_message: Option<String>,
 }
 
@@ -316,7 +318,8 @@ fn evaluate(input: &HookInput, cfg: &Config, data_dir: &Path, session_id: &str) 
     let transcript_path = input.transcript_path.as_deref().ok_or("transcript_path がない")?;
     let entries = transcript::load(Path::new(transcript_path))
         .map_err(|e| format!("会話記録 {transcript_path} を読めない: {e}"))?;
-    let start = transcript::turn_start(&entries, input.prompt_id.as_deref())
+    let turn = input.prompt_id.as_deref().or(input.turn_id.as_deref());
+    let start = transcript::turn_start(&entries, turn)
         .ok_or("会話記録にプロンプトが見つからない")?;
     let cwd = input.cwd.clone().unwrap_or_default();
     let facts = collect_facts(&entries, start, &cwd, cfg);
@@ -354,7 +357,7 @@ fn evaluate(input: &HookInput, cfg: &Config, data_dir: &Path, session_id: &str) 
     // Issue text can quote the report, so strip anything that could forge terminal output.
     let issues: Vec<String> = issues.iter().map(|i| clip(i, 300)).collect();
 
-    let turn_key = input.prompt_id.clone().unwrap_or_else(|| entries[start].uuid.clone());
+    let turn_key = turn.map(str::to_string).unwrap_or_else(|| entries[start].uuid.clone());
     let path = state_path(data_dir, session_id);
     // Only a missing state file means "no rejections yet". Any other failure must not reset the count.
     let mut state: State = match read_regular(&path, MAX_INPUT_BYTES) {
@@ -372,7 +375,11 @@ fn evaluate(input: &HookInput, cfg: &Config, data_dir: &Path, session_id: &str) 
     // Second, state-independent limit: the harness records each rejection in the transcript.
     let rejections = entries[start..]
         .iter()
-        .filter(|e| e.kind == Kind::User && e.is_meta && e.text.starts_with("Stop hook feedback"))
+        .filter(|e| {
+            e.kind == Kind::User
+                && e.is_meta
+                && (e.text.starts_with("Stop hook feedback") || e.text.starts_with(transcript::codex::BLOCK_PREFIX))
+        })
         .count();
     let within_limit = rejections <= cfg.max_rounds as usize;
     if !issues.is_empty() && within_limit && (teaching || state.rounds < cfg.max_rounds) {

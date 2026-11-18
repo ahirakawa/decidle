@@ -132,6 +132,7 @@ fn row(s: &Session) -> Value {
         "cwd": s.cwd,
         "state": state_name(s),
         "started": s.started,
+        "agent": s.agent.as_deref().unwrap_or("claude"),
         "last_stop": s.last_stop,
         "report_title": s.report_title,
         "report_goal": s.report_goal,

@@ -39,7 +39,8 @@ SELECT
     j->>'attention',
     j->>'note',
     CASE WHEN json_type(j->'questions') = 'ARRAY' THEN CAST(j->'questions' AS VARCHAR) END,
-    j->>'report_goal'
+    j->>'report_goal',
+    j->>'agent'
 FROM parsed ORDER BY n
 "#;
 
@@ -62,10 +63,11 @@ type Row = (
     Option<String>,
     Option<String>,
     Option<String>,
+    Option<String>,
 );
 
 fn to_event(r: Row) -> Option<Event> {
-    let (ts, ts_us, session_id, cwd, event, pid, pid_started, report_path, report_title, decisions, resolves, transcript_path, report_html, background, attention, note, questions, report_goal) = r;
+    let (ts, ts_us, session_id, cwd, event, pid, pid_started, report_path, report_title, decisions, resolves, transcript_path, report_html, background, attention, note, questions, report_goal, agent) = r;
     Some(Event {
         ts: ts?,
         ts_us: ts_us?,
@@ -85,6 +87,7 @@ fn to_event(r: Row) -> Option<Event> {
         note,
         questions: questions.as_deref().map(parse_questions).unwrap_or_default(),
         report_goal,
+        agent,
     })
 }
 
@@ -129,6 +132,7 @@ pub fn load(path: &Path) -> Result<Loaded, String> {
                 row.get(15)?,
                 row.get(16)?,
                 row.get(17)?,
+                row.get(18)?,
             ))
         })
         .map_err(fail)?;

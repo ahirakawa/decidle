@@ -193,7 +193,8 @@ function tick() {
 
 function meta(s) {
   const dup = sessions.filter(x => x.folder === s.folder).length > 1;
-  return h("div", { class: "meta", title: s.session_id }, h("span", { class: dup ? "dup" : "" }, startLabel(s)));
+  return h("div", { class: "meta", title: s.session_id }, h("span", { class: dup ? "dup" : "" }, startLabel(s)),
+    s.agent === "codex" ? " · Codex" : null);
 }
 function say(s) {
   if (s.state === "permission") return h("div", { class: "say" }, "ターミナルで許可を出してほしい");

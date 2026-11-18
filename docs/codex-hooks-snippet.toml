@@ -1,0 +1,43 @@
+# decidle の hook を Codex CLI に足す例。~/.codex/config.toml(CODEX_HOME を変えていれば
+# $CODEX_HOME/config.toml)の末尾に足す。書き方は Codex の公式の文書の [hooks] の表に合わせた。
+# 足したあと、codex の中で /hooks を開き、6 つの hook を信頼する。信頼するまで hook は動かない。
+# hook の中身を変えたときも、もう一度信頼が要る。
+# 許可待ちの記録には PermissionRequest を、承認の拒否や中断の記録には Interrupt を使う。
+# SessionEnd と Interrupt の timeout は既定 1 秒、上限 3 秒。
+
+[[hooks.Stop]]
+[[hooks.Stop.hooks]]
+type = "command"
+command = 'b="$HOME/.local/bin/decidle"; [ -x "$b" ] || exit 0; exec "$b" stop'
+timeout = 60
+
+[[hooks.SessionStart]]
+matcher = "startup|resume|clear|compact|fork"
+[[hooks.SessionStart.hooks]]
+type = "command"
+command = 'b="$HOME/.local/bin/decidle"; [ -x "$b" ] || exit 0; exec "$b" event'
+timeout = 10
+
+[[hooks.UserPromptSubmit]]
+[[hooks.UserPromptSubmit.hooks]]
+type = "command"
+command = 'b="$HOME/.local/bin/decidle"; [ -x "$b" ] || exit 0; exec "$b" event'
+timeout = 10
+
+[[hooks.PermissionRequest]]
+[[hooks.PermissionRequest.hooks]]
+type = "command"
+command = 'b="$HOME/.local/bin/decidle"; [ -x "$b" ] || exit 0; exec "$b" event'
+timeout = 10
+
+[[hooks.Interrupt]]
+[[hooks.Interrupt.hooks]]
+type = "command"
+command = 'b="$HOME/.local/bin/decidle"; [ -x "$b" ] || exit 0; exec "$b" event'
+timeout = 3
+
+[[hooks.SessionEnd]]
+[[hooks.SessionEnd.hooks]]
+type = "command"
+command = 'b="$HOME/.local/bin/decidle"; [ -x "$b" ] || exit 0; exec "$b" event'
+timeout = 3

@@ -24,6 +24,15 @@ Claude Code の Stop hook。エージェントに報告を JSON で書かせ、�
 
 `~/.local/bin/decidle` が無い PC では、どの hook も何もせずに終わる。`hooks/stop_decidle.sh` は settings からは使わない。手で `hooks/stop_decidle.sh render <report.json>` と打って報告のページを書き直すときに使う。
 
+## Codex CLI で使う
+
+Codex CLI(0.169 で試した)でも、同じバイナリで報告の点検と Home の記録が動く(SPEC AMENDMENT、2026-11-18 依頼者承認)。
+
+1. `docs/codex-hooks-snippet.toml` の中身を `~/.codex/config.toml` の末尾に足す。
+2. codex の中で `/hooks` を開き、足した hook を信頼する。信頼するまで、hook は動かない。
+
+Codex では、許可待ちを PermissionRequest で、承認の拒否と中断を Interrupt で記録する。中断のあとのセッションは表から消える。限界(承認を許可したあとの流れ、圧縮、再開、subagent を待たずに止まった場合などは試していない)は `docs/spec-home.md` の「Codex CLI」の節にある。
+
 ## 使い方
 
 - 止めたいターミナルは `DECIDLE_MODE=off claude` で起動する。

@@ -48,6 +48,13 @@ fn model_step(acc: Acc, ev: Ev, i: usize) -> Acc {
             }
         }
         "end" => Acc { st: "ended", ..acc },
+        "interrupt" => {
+            if matches!(acc.st, "working" | "permission" | "background") {
+                Acc { st: "idle", ..acc }
+            } else {
+                acc
+            }
+        }
         _ => unreachable!(),
     }
 }
@@ -100,7 +107,7 @@ impl Rng {
     }
 }
 
-const KINDS: [&str; 7] = ["start", "prompt", "permission", "stop", "resolved", "kill", "end"];
+const KINDS: [&str; 8] = ["start", "prompt", "permission", "stop", "resolved", "kill", "end", "interrupt"];
 const SESSIONS: usize = 3;
 
 fn ts_of(i: usize) -> String {
