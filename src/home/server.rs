@@ -336,16 +336,30 @@ impl Server {
 
     /// Serves a page only if a stop line recorded it and the request names it exactly.
     fn report_page(&self, raw_target: &str) -> Response {
+        // The Home page passes its look, since the report page runs no script and cannot read
+        // it. Only these two queries are taken; any other query is not a report link.
+        let (target, skin) = match raw_target.split_once('?') {
+            None => (raw_target, None),
+            Some((t, "skin=naname")) => (t, Some("naname")),
+            Some((t, "skin=shimen")) => (t, Some("shimen")),
+            Some(_) => return error(404, "not found"),
+        };
         let loaded = match read::load(&self.events) {
             Ok(l) => l,
             Err(e) => return error(500, &e),
         };
         let recorded = loaded.events.iter().filter(|e| e.kind == Some(Kind::Stop)).find_map(|e| {
             let html = e.report_html.as_deref()?;
-            (report_link(html).as_deref() == Some(raw_target)).then_some(html)
+            (report_link(html).as_deref() == Some(target)).then_some(html)
         });
         match recorded.map(read_page) {
-            Some(Ok(body)) => Response { status: 200, content_type: "text/html; charset=utf-8", csp: REPORT_CSP, body },
+            Some(Ok(body)) => {
+                let body = match skin {
+                    Some(skin) => body.replacen("<body>", &format!("<body data-skin=\"{skin}\">"), 1),
+                    None => body,
+                };
+                Response { status: 200, content_type: "text/html; charset=utf-8", csp: REPORT_CSP, body }
+            }
             _ => error(404, "not found"),
         }
     }

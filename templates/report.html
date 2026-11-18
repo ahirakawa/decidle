@@ -6,51 +6,48 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>{{title}}</title>
 <style>
-  :root {
-    --bg: #f5f9f4; --fg: #1b2a1f; --muted: #58695c; --line: #d2dfd3;
-    --card: #ffffff; --accent: #1d7443; --accent-bg: #e2f2e7; --warn: #8a4b00; --warn-bg: #fbf1df;
-  }
-  @media (prefers-color-scheme: dark) {
-    :root {
-      --bg: #111a14; --fg: #e2ede4; --muted: #93a697; --line: #2b3a2f;
-      --card: #19241c; --accent: #72d394; --accent-bg: #1c3626; --warn: #ffc27d; --warn-bg: #3a2c17;
-    }
-  }
+  /* The look of the Home page (src/home/page.html): the same two skins and the same colors as
+     the report beside the list. Without data-skin on the body, the default skin (naname). */
+  :root { --num: "Avenir Next Condensed", "DIN Condensed", "Helvetica Neue", sans-serif; --jp: "Hiragino Sans", "Yu Gothic UI", sans-serif; --min: "Hiragino Mincho ProN", "Yu Mincho", serif;
+    --ink: #0b0c0f; --paper: #f1eee4; --ac: #c9f73a; --bg: #0b0c0f; --fg: #f1eee4; --warn: #ff6b57; }
+  body[data-skin="shimen"] { --ink: #14130f; --paper: #fffdf6; --ac: #1f3fff; --bg: #efe9dc; --fg: #14130f; --warn: #ff6a1f; }
   * { box-sizing: border-box; }
-  body {
-    margin: 0; background: var(--bg); color: var(--fg);
-    font: 16px/1.75 "Sarasa Fixed J", "Sarasa Fixed", ui-monospace, "SF Mono", Menlo, monospace;
-  }
-  main { max-width: 720px; margin: 0 auto; padding: 28px 20px 64px; }
-  header { color: var(--muted); font-size: 13px; margin-bottom: 4px; }
-  h1 { font-size: 15px; font-weight: 600; color: var(--muted); margin: 0 0 12px; }
-  .goal { color: var(--muted); margin: 0 0 10px; }
-  .goal::before { content: "やろうとしていたこと: "; }
-  .conclusion { font-size: 19px; line-height: 1.7; margin: 0 0 28px; padding-left: 14px; border-left: 4px solid var(--accent); }
-  h2 { font-size: 13px; font-weight: 600; color: var(--accent); margin: 0 0 10px; letter-spacing: .04em; }
-  .none { color: var(--muted); margin: 0 0 28px; }
-  .decision { background: var(--card); border: 1px solid var(--line); border-radius: 10px; padding: 16px 18px; margin: 0 0 14px; }
-  .decision h3 { font-size: 17px; margin: 0 0 12px; line-height: 1.5; }
-  .option { border: 1px solid var(--line); border-radius: 8px; padding: 10px 12px; margin: 0 0 8px; }
-  .option.recommended { border-color: var(--accent); background: var(--accent-bg); }
-  .option .label { font-weight: 600; }
-  .badge { display: inline-block; font-size: 12px; font-weight: 600; color: var(--accent); border: 1px solid var(--accent); border-radius: 999px; padding: 0 8px; margin-left: 8px; line-height: 1.6; }
-  .option .effect { color: var(--muted); font-size: 14px; }
-  .reason { font-size: 14px; margin: 10px 0 0; }
-  .warn { background: var(--warn-bg); color: var(--warn); border-radius: 8px; padding: 10px 14px; margin: 0 0 20px; font-size: 14px; }
-  .warn ul { margin: 4px 0 0; padding-left: 20px; }
-  details { border-top: 1px solid var(--line); padding: 10px 0; }
-  details:last-of-type { border-bottom: 1px solid var(--line); }
-  summary { cursor: pointer; font-weight: 600; font-size: 15px; }
-  summary .count { color: var(--muted); font-weight: 400; margin-left: 6px; }
-  details ul { margin: 8px 0 4px; padding-left: 22px; }
-  details li { margin: 4px 0; }
-  .folded { margin-top: 28px; }
-  code, .path { font-size: 14px; overflow-wrap: anywhere; color: var(--accent); }
+  body { margin: 0; background: var(--bg); color: var(--fg); font: 14px/1.5 var(--jp); }
+  main { max-width: 900px; margin: 28px auto 64px; padding: 22px 28px 28px; background: var(--paper); color: var(--ink); font-size: 14.5px; line-height: 1.7; border-left: 10px solid var(--ac); }
+  body[data-skin="shimen"] main { border: 3px solid var(--ink); box-shadow: 8px 8px 0 var(--ac); }
+  @media (max-width: 960px) { main { margin: 16px 18px 48px; } }
+  header { font: 700 11px var(--jp); opacity: .6; overflow-wrap: anywhere; }
+  h1 { font-size: 24px; font-weight: 900; line-height: 1.3; margin: 2px 0 6px; }
+  body[data-skin="shimen"] h1 { font-family: var(--min); }
+  .goal { font-size: 12.5px; opacity: .75; margin: 0 0 12px; }
+  .goal::before { content: "目的: "; }
+  .conclusion { font-weight: 700; font-size: 16px; margin: 0; }
+  h2 { font: 900 12px var(--jp); letter-spacing: .1em; margin: 24px 0 8px; padding-bottom: 2px; border-bottom: 3px solid var(--ink); display: inline-block; }
+  .none { opacity: .6; margin: 0; }
+  .decision { margin: 0 0 16px; }
+  .decision h3 { font-size: 15px; font-weight: 900; margin: 6px 0 4px; line-height: 1.5; }
+  .option { border: 2px solid var(--ink); padding: 6px 10px; margin: 6px 0; }
+  .option.recommended { background: var(--ink); color: var(--paper); }
+  .option .label { font-weight: 700; }
+  .badge { display: inline-block; margin-left: 8px; padding: 0 7px; font-size: 10.5px; font-weight: 900; background: var(--ac); color: #111; }
+  body[data-skin="shimen"] .badge { color: #fff; }
+  .option .effect { font-size: 13.5px; }
+  .reason { font-size: 12.5px; opacity: .85; margin: 4px 0 0; }
+  .reason::before { content: "理由: "; }
+  .warn { border: 3px solid var(--warn); padding: 10px 14px; margin: 10px 0 16px; font-size: 13.5px; font-weight: 700; }
+  .warn ul { margin: 4px 0 0; padding-left: 1.2em; font-weight: 400; }
+  .folded { margin-top: 24px; }
+  details { border-top: 3px solid var(--ink); padding: 8px 0; }
+  details:last-of-type { border-bottom: 3px solid var(--ink); }
+  summary { cursor: pointer; font: 900 12px var(--jp); letter-spacing: .1em; }
+  summary .count { opacity: .6; margin-left: 6px; letter-spacing: 0; }
+  details ul { margin: 8px 0 4px; padding-left: 1.2em; }
+  details li { margin-bottom: 5px; }
+  code, .path { font: 600 12px ui-monospace, Menlo, monospace; overflow-wrap: anywhere; }
   .file { margin: 10px 0 14px; }
-  .file .summary { font-size: 14px; }
-  .change { border-left: 3px solid var(--line); padding: 2px 0 2px 12px; margin: 8px 0; font-size: 14px; }
-  .change .k { color: var(--muted); display: inline-block; min-width: 4.5em; }
+  .file .summary { font-size: 13.5px; }
+  .change { font-size: 12px; opacity: .85; margin: 4px 0 0; padding-left: 10px; border-left: 3px solid currentColor; }
+  .change .k { opacity: .65; display: inline-block; min-width: 4.5em; }
 </style>
 </head>
 <body>

@@ -252,7 +252,6 @@ function sheet(s) {
     h("div", { class: "cmds" },
       s.answer_text ? btn("go", "推奨で進める", () => post("/api/answer", s), "上の文を端末に入力して Enter を押す") : null,
       close && s.term ? btn(first === "focus" ? "go" : "sub", "端末へ行く", () => post("/api/focus", s), "このセッションの端末を前に出す") : null,
-      s.report_url ? h("a", { class: "cmd sub", href: s.report_url, target: "_blank", rel: "noopener" }, h("span", {}, "報告を開く")) : null,
       close ? btn(first === "resolve" ? "go" : "sub", "外す", () => post("/api/resolve", s), "見たので一覧から外す。エージェントには何も送らない") : null,
       close ? btn("end", "終了…", () => kill(s)) : null));
 }
@@ -275,7 +274,7 @@ function drawSide(s) {
   if (!s || !s.report_title) return side.replaceChildren();
   if (!r) return side.replaceChildren(h("article", { class: "rep" }, h("div", { class: "kick" }, "REPORT"), h("h2", {}, s.report_title), h("p", { class: "gone" }, rep.key ? "報告のファイルを読めない(もう消えているかもしれない)。" : "読み込み中…")));
   side.replaceChildren(h("article", { class: "rep" },
-    h("div", { class: "kick" }, "REPORT", s.report_url ? h("a", { href: s.report_url, target: "_blank", rel: "noopener" }, "別のタブで開く") : null),
+    h("div", { class: "kick" }, "REPORT", s.report_url ? h("a", { href: s.report_url + "?skin=" + document.body.dataset.skin, target: "_blank", rel: "noopener" }, "別のタブで開く") : null),
     h("h2", {}, str(r.title) || s.report_title),
     str(r.goal) ? h("p", { class: "goal" }, "目的: " + r.goal) : null,
     h("p", { class: "concl" }, str(r.conclusion)),
