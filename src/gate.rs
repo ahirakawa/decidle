@@ -190,6 +190,19 @@ fn show_in_portal(html_path: &str, cfg: &Config) -> Option<String> {
     }
 }
 
+/// Tells the agent which turns need a report, so that it stops writing one after every small task.
+fn when_to_report(cfg: &Config) -> String {
+    let mut lines = vec![
+        "報告を書くのは、次のどれかに当たるターンだけにする。当たらないターンでは、人間に頼まれないかぎり報告の JSON を書かない。".to_string(),
+        format!("- 編集したファイルが {} 個以上ある。", cfg.edited_files_threshold),
+        format!("- ツールの呼び出しが {} 回以上ある。", cfg.tool_call_threshold),
+    ];
+    for command in &cfg.trigger_commands {
+        lines.push(format!("- `{command}` を実行した。"));
+    }
+    lines.join("\n")
+}
+
 /// Stop hook entry point. Any failure of the gate itself lets the agent stop.
 pub fn run_stop() {
     if std::env::var("REPORT_GATE_MODE").is_ok_and(|m| m == "off") {
@@ -289,7 +302,10 @@ fn evaluate(input: &HookInput, cfg: &Config, data_dir: &Path, session_id: &str) 
         }
         // Without a saved count the limit cannot be enforced, so do not block if saving fails.
         save_state(&path, &state)?;
-        let reason = format!("報告が決まりに合っていない。次の点を直すこと。\n\n{list}\n\n{REPORT_FORMAT}");
+        let reason = format!(
+            "報告が決まりに合っていない。次の点を直すこと。\n\n{list}\n\n{}\n\n{REPORT_FORMAT}",
+            when_to_report(cfg)
+        );
         println!("{}", json!({ "decision": "block", "reason": reason }));
         log(data_dir, session_id, "block", &issues, state.rounds, None);
         return Ok(());

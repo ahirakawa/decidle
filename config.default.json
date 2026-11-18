@@ -33,7 +33,8 @@
     "Write",
     "NotebookEdit"
   ],
-  "tool_call_threshold": 8,
+  "edited_files_threshold": 3,
+  "tool_call_threshold": 20,
   "trigger_commands": [
     "maestri ask"
   ],

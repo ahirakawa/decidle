@@ -128,8 +128,9 @@ fn invokes(command: &str, program: &str) -> bool {
         .any(|part| part.trim_start().starts_with(program))
 }
 
+/// Small turns are left alone: a report for a one-line change costs the human more than it tells them.
 pub fn should_check(facts: &TurnFacts, cfg: &Config) -> bool {
-    !facts.edited_files.is_empty()
+    facts.edited_files.len() >= cfg.edited_files_threshold
         || facts.report_file.is_some()
         || facts.tool_calls >= cfg.tool_call_threshold
         || facts

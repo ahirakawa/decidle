@@ -25,7 +25,7 @@ impl Sandbox {
         fs::create_dir_all(&cwd).unwrap();
         fs::write(
             home.join(".config/agent-report-gate/config.json"),
-            r#"{"ignore_path_patterns": ["/ignored/", ".report-gate/"]}"#,
+            r#"{"edited_files_threshold": 1, "tool_call_threshold": 8, "ignore_path_patterns": ["/ignored/", ".report-gate/"]}"#,
         )
         .unwrap();
         Sandbox { home, cwd }
@@ -376,7 +376,7 @@ fn fake_portal(sb: &Sandbox, navigate_ok: bool, create_ok: bool) -> PathBuf {
     fs::set_permissions(&script, fs::Permissions::from_mode(0o755)).unwrap();
     fs::write(
         sb.home.join(".config/agent-report-gate/config.json"),
-        json!({"ignore_path_patterns": ["/ignored/", ".report-gate/"], "portal_command": script}).to_string(),
+        json!({"edited_files_threshold": 1, "tool_call_threshold": 8, "ignore_path_patterns": ["/ignored/", ".report-gate/"], "portal_command": script}).to_string(),
     )
     .unwrap();
     fs::write(sb.home.join("in-maestri"), "").unwrap();
@@ -418,7 +418,7 @@ fn portal_is_not_touched_outside_maestri_or_when_turned_off() {
     let calls = fake_portal(&sb, false, true);
     fs::write(
         sb.home.join(".config/agent-report-gate/config.json"),
-        r#"{"ignore_path_patterns": ["/ignored/", ".report-gate/"], "portal_command": ""}"#,
+        r#"{"edited_files_threshold": 1, "tool_call_threshold": 8, "ignore_path_patterns": ["/ignored/", ".report-gate/"], "portal_command": ""}"#,
     )
     .unwrap();
     passed(&sb.stop(&passing_transcript(&sb), "p1"));
@@ -453,7 +453,7 @@ fn portal_failure_still_passes_and_is_logged() {
     fake_portal(&sb, false, true);
     fs::write(
         sb.home.join(".config/agent-report-gate/config.json"),
-        r#"{"ignore_path_patterns": ["/ignored/", ".report-gate/"], "portal_command": "/nonexistent/maestri"}"#,
+        r#"{"edited_files_threshold": 1, "tool_call_threshold": 8, "ignore_path_patterns": ["/ignored/", ".report-gate/"], "portal_command": "/nonexistent/maestri"}"#,
     )
     .unwrap();
     passed(&sb.stop(&passing_transcript(&sb), "p1"));
@@ -667,6 +667,28 @@ fn short_exchange_is_not_checked() {
     let t = sb.transcript(&[bash("ls"), bash("pwd")]);
     assert_eq!(sb.stop(&t, "p1"), "");
     assert!(sb.log_lines().is_empty());
+}
+
+#[test]
+fn small_turns_are_not_checked_with_the_default_thresholds() {
+    let default_thresholds = r#"{"ignore_path_patterns": ["/ignored/", ".report-gate/"]}"#;
+    let sb = Sandbox::new();
+    fs::write(sb.home.join(".config/agent-report-gate/config.json"), default_thresholds).unwrap();
+    let mut tools = vec![edit(&sb.file("a.md")), edit(&sb.file("b.md"))];
+    tools.extend((0..17).map(|_| bash("ls")));
+    assert_eq!(sb.stop(&sb.transcript(&tools), "p1"), "", "2 edits and 19 tool calls");
+    assert!(sb.log_lines().is_empty());
+
+    let three_edits = [edit(&sb.file("a.md")), edit(&sb.file("b.md")), edit(&sb.file("c.md"))];
+    let why = reason(&sb.stop(&sb.transcript(&three_edits), "p1"));
+    assert!(why.contains("報告の JSON が書かれていない"), "{why}");
+    assert!(why.contains("編集したファイルが 3 個以上") && why.contains("ツールの呼び出しが 20 回以上"), "{why}");
+    assert!(why.contains("`maestri ask` を実行した") && why.contains("当たらないターンでは"), "{why}");
+
+    let sb = Sandbox::new();
+    fs::write(sb.home.join(".config/agent-report-gate/config.json"), default_thresholds).unwrap();
+    let many: Vec<Value> = (0..20).map(|_| bash("ls")).collect();
+    assert!(reason(&sb.stop(&sb.transcript(&many), "p1")).contains("報告の JSON が書かれていない"));
 }
 
 #[test]

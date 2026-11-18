@@ -23,6 +23,8 @@ pub struct Config {
     pub code_extensions: Vec<String>,
     pub ignore_path_patterns: Vec<String>,
     pub edit_tools: Vec<String>,
+    /// A turn is checked when it edits at least this many files.
+    pub edited_files_threshold: usize,
     pub tool_call_threshold: usize,
     pub trigger_commands: Vec<String>,
     pub role_dir_marker: String,
