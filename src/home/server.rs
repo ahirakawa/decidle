@@ -30,6 +30,8 @@ pub struct Server {
     events: PathBuf,
     /// Runs one terminal command. Tests replace it.
     runner: fn(&[String]) -> Result<String, String>,
+    /// The terminal app to raise after a focus; None leaves the windows as they are.
+    host_app: Option<String>,
 }
 
 struct Request {
@@ -223,7 +225,11 @@ impl Server {
     pub fn bind(port: u16, events: PathBuf) -> io::Result<Server> {
         let listener = TcpListener::bind((Ipv4Addr::LOCALHOST, port))?;
         let port = listener.local_addr()?.port();
-        Ok(Server { listener, port, token: random_token()?, events, runner: term::run })
+        Ok(Server { listener, port, token: random_token()?, events, runner: term::run, host_app: None })
+    }
+
+    pub fn set_host_app(&mut self, app: Option<String>) {
+        self.host_app = app;
     }
 
     pub fn set_runner(&mut self, runner: fn(&[String]) -> Result<String, String>) {
@@ -418,6 +424,9 @@ impl Server {
         if let Err(r) = self.check_occupant(&session) {
             return r;
         }
+        let mut commands = commands;
+        // The multiplexer switched the pane inside its window; bring that window forward too.
+        commands.extend(self.host_app.as_deref().map(term::raise_command));
         self.run_all(&commands)
     }
 
@@ -476,7 +485,8 @@ impl Server {
 /// `decidle serve`. Stops with an error when the port is taken.
 pub fn serve(port: u16, clean: super::clean::Settings) -> i32 {
     match Server::bind(port, events::events_path()) {
-        Ok(server) => {
+        Ok(mut server) => {
+            server.set_host_app(term::host_app(|k| std::env::var(k).ok()));
             eprintln!("decidle serve: http://127.0.0.1:{}/", server.port());
             // Old reports: now, then once a day (see clean.rs).
             super::clean::spawn_daily(events::events_path(), clean);

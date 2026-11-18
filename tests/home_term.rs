@@ -60,3 +60,12 @@ fn the_answer_is_built_from_questions_and_recommended_options_only() {
         assert_eq!(term::answer_text(&stopped(&["問い"], &[bad])), None, "{bad}");
     }
 }
+
+#[test]
+fn the_host_app_is_a_plain_bundle_id_or_nothing() {
+    assert_eq!(term::host_app(env(&[("__CFBundleIdentifier", "com.mitchellh.ghostty")])).as_deref(), Some("com.mitchellh.ghostty"));
+    assert_eq!(term::host_app(env(&[])), None);
+    assert_eq!(term::host_app(env(&[("__CFBundleIdentifier", "-a Calculator")])), None);
+    assert_eq!(term::host_app(env(&[("__CFBundleIdentifier", "a/b")])), None);
+    assert_eq!(term::raise_command("com.x.y"), vec!["open", "-b", "com.x.y"]);
+}

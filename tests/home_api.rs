@@ -799,3 +799,48 @@ fn herdr_pane_is_checked_to_still_hold_the_session_before_anything_is_typed() {
     let _ = claude.kill();
     let _ = claude.wait();
 }
+
+static RAISE_CALLS: std::sync::Mutex<Vec<Vec<String>>> = std::sync::Mutex::new(Vec::new());
+
+fn record_raise(argv: &[String]) -> Result<String, String> {
+    RAISE_CALLS.lock().unwrap().push(argv.to_vec());
+    Ok(String::new())
+}
+
+#[test]
+fn focus_raises_the_terminal_app_and_answer_does_not() {
+    let dir = temp_dir();
+    let mut claude = fake_claude(&dir);
+    let pid = claude.id() as i64;
+    let started = procinfo::info(pid).unwrap().started;
+    let log = dir.join("events.jsonl");
+    let base = SystemTime::now() - Duration::from_secs(60);
+    let idle = transcript(&dir, "idle.jsonl", &[("user", base), ("assistant", base)]);
+    let ts = write_log(
+        &log,
+        &[
+            ("s", "start", json!({"pid": pid, "pid_started": started, "transcript_path": idle, "term": "cmux", "term_id": "SURF-1"})),
+            ("s", "stop", json!({"report_title": "題", "decisions": 1, "questions": ["問い"], "recommends": ["推奨"]})),
+        ],
+        base,
+    );
+    let mut server = Server::bind(0, log.clone()).unwrap();
+    server.set_runner(record_raise);
+    server.set_host_app(Some("com.example.term".into()));
+    let port = server.port();
+    std::thread::spawn(move || server.run());
+    let (_, page) = request(port, "GET", "/", &[], "");
+    let marker = "name=\"decidle-token\" content=\"";
+    let at = page.find(marker).unwrap() + marker.len();
+    let token = page[at..at + 64].to_string();
+    let target = json!({"session_id": "s", "resolves": ts[1]});
+    let last = || RAISE_CALLS.lock().unwrap().last().cloned().unwrap();
+
+    assert_eq!(post(port, "/api/focus", &token, &target).0, 200);
+    assert_eq!(last(), vec!["open", "-b", "com.example.term"]);
+    assert_eq!(post(port, "/api/answer", &token, &target).0, 200);
+    assert_eq!(last()[..2], ["cmux".to_string(), "send-key".to_string()]);
+    assert!(!RAISE_CALLS.lock().unwrap().iter().skip(3).any(|c| c[0] == "open"));
+    let _ = claude.kill();
+    let _ = claude.wait();
+}

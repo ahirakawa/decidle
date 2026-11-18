@@ -113,6 +113,20 @@ pub fn answer_commands(s: &Session, text: &str) -> Option<Vec<Vec<String>>> {
     }
 }
 
+/// The macOS app this process was started from (the terminal that shows the multiplexer), from
+/// the bundle id the system puts in the environment. The focus button raises it, since the
+/// multiplexer only switches panes inside its own window.
+pub fn host_app(var: impl Fn(&str) -> Option<String>) -> Option<String> {
+    var("__CFBundleIdentifier")
+        .filter(|id| !id.is_empty() && id.len() <= 100 && !id.starts_with('-'))
+        .filter(|id| id.chars().all(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | '-')))
+}
+
+/// The command that brings that app to the front.
+pub fn raise_command(bundle_id: &str) -> Vec<String> {
+    vec!["open".into(), "-b".into(), bundle_id.into()]
+}
+
 /// herdr numbers panes by position, so a recorded pane id can come to name another pane.
 /// The command whose output says which agent session the pane holds now; None for terminals
 /// whose ids are not reused.
