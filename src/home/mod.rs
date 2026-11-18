@@ -2,6 +2,7 @@
 //! per session. See docs/spec-home.md and docs/tla/Home.tla.
 pub mod activity;
 pub mod background;
+pub mod clean;
 pub mod events;
 pub mod note;
 pub mod procinfo;

@@ -384,10 +384,12 @@ impl Server {
 }
 
 /// `decidle serve`. Stops with an error when the port is taken.
-pub fn serve(port: u16) -> i32 {
+pub fn serve(port: u16, clean: super::clean::Settings) -> i32 {
     match Server::bind(port, events::events_path()) {
         Ok(server) => {
             eprintln!("decidle serve: http://127.0.0.1:{}/", server.port());
+            // Old reports: now, then once a day (see clean.rs).
+            super::clean::spawn_daily(events::events_path(), clean);
             server.run();
             0
         }

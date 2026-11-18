@@ -40,6 +40,15 @@ pub struct Config {
     pub portal_command: String,
     /// Port of the Home page (`decidle serve`), on 127.0.0.1.
     pub home_port: u16,
+    /// Reports of a session resolved or ended this many days ago are deleted by `decidle serve`
+    /// and `decidle clean`. 0 turns this off.
+    pub clean_after_days: u64,
+}
+
+impl Config {
+    pub fn clean_settings(&self) -> decidle::home::clean::Settings {
+        decidle::home::clean::Settings { after_days: self.clean_after_days, report_dir: self.report_dir.clone() }
+    }
 }
 
 impl Config {
