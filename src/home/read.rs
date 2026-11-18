@@ -40,7 +40,11 @@ SELECT
     j->>'note',
     CASE WHEN json_type(j->'questions') = 'ARRAY' THEN CAST(j->'questions' AS VARCHAR) END,
     j->>'report_goal',
-    j->>'agent'
+    j->>'agent',
+    CASE WHEN json_type(j->'recommends') = 'ARRAY' THEN CAST(j->'recommends' AS VARCHAR) END,
+    j->>'term',
+    j->>'term_id',
+    j->>'term_ws'
 FROM parsed ORDER BY n
 "#;
 
@@ -64,10 +68,15 @@ type Row = (
     Option<String>,
     Option<String>,
     Option<String>,
+    Option<String>,
+    Option<String>,
+    Option<String>,
+    Option<String>,
 );
 
 fn to_event(r: Row) -> Option<Event> {
-    let (ts, ts_us, session_id, cwd, event, pid, pid_started, report_path, report_title, decisions, resolves, transcript_path, report_html, background, attention, note, questions, report_goal, agent) = r;
+    let (ts, ts_us, session_id, cwd, event, pid, pid_started, report_path, report_title, decisions, resolves, transcript_path, report_html, background, attention, note, questions, report_goal, agent, recommends, term, term_id, term_ws) = r;
+    let (term, term_id, term_ws) = super::term::checked(term, term_id, term_ws);
     Some(Event {
         ts: ts?,
         ts_us: ts_us?,
@@ -88,6 +97,10 @@ fn to_event(r: Row) -> Option<Event> {
         questions: questions.as_deref().map(parse_questions).unwrap_or_default(),
         report_goal,
         agent,
+        recommends: recommends.as_deref().map(parse_recommends).unwrap_or_default(),
+        term,
+        term_id,
+        term_ws,
     })
 }
 
@@ -95,6 +108,15 @@ fn to_event(r: Row) -> Option<Event> {
 fn parse_questions(text: &str) -> Vec<String> {
     match serde_json::from_str::<Vec<serde_json::Value>>(text) {
         Ok(v) => v.into_iter().filter_map(|q| q.as_str().map(str::to_string)).collect(),
+        Err(_) => Vec::new(),
+    }
+}
+
+/// The `recommends` array of a stop line. An entry that is not a string reads as empty, so the
+/// positions still match `questions`.
+fn parse_recommends(text: &str) -> Vec<String> {
+    match serde_json::from_str::<Vec<serde_json::Value>>(text) {
+        Ok(v) => v.into_iter().map(|q| q.as_str().unwrap_or_default().to_string()).collect(),
         Err(_) => Vec::new(),
     }
 }
@@ -133,6 +155,10 @@ pub fn load(path: &Path) -> Result<Loaded, String> {
                 row.get(16)?,
                 row.get(17)?,
                 row.get(18)?,
+                row.get(19)?,
+                row.get(20)?,
+                row.get(21)?,
+                row.get(22)?,
             ))
         })
         .map_err(fail)?;

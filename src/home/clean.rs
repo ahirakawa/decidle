@@ -42,7 +42,7 @@ impl Settings {
 }
 
 fn closed(st: St) -> bool {
-    matches!(st, St::Resolved | St::Ended)
+    matches!(st, St::Resolved | St::Answered | St::Ended)
 }
 
 #[derive(Default)]
@@ -91,7 +91,8 @@ pub fn candidates(events: &[Event], now_us: i64, after_us: Option<i64>, unanswer
                 t.open = if ev.decisions > 0 { paths } else { Vec::new() };
             }
             Some(Kind::Prompt) => t.open.clear(),
-            Some(Kind::Resolved) if after != before => t.open.clear(),
+            // An accepted resolve or answer: the human dealt with the decisions.
+            Some(Kind::Resolved | Kind::Answer) if after != before => t.open.clear(),
             _ => {}
         }
     }

@@ -790,10 +790,13 @@ fn passing_stop_records_the_report_on_the_home_page() {
     assert!(line["report_html"].as_str().unwrap().ends_with(".decidle/task.html"), "{line}");
     // The question and the goal come from the report the agent wrote, for the Home card.
     assert_eq!(line["questions"], json!(["保存先をどちらにするか"]));
+    // The recommended option of each decision, for the answer button.
+    assert_eq!(line["recommends"], json!(["ローカル"]));
     assert_eq!(line["report_goal"], "設定の誤りで止まる作業を、また動くようにしたい。");
     // The prompt text and the other parts of the report are not copied into the stop line.
     let text = line.to_string();
-    for absent in ["作業して", "直して", "ローカル", "外に出さない", "設定を直した。"] {
+    // (The label of the recommended option is the exception, see above.)
+    for absent in ["作業して", "直して", "外に出さない", "設定を直した。"] {
         assert!(!text.contains(absent), "{absent}: {line}");
     }
 }

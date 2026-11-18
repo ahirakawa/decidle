@@ -13,6 +13,7 @@ use super::events::{self, LogLock};
 use super::procinfo;
 use super::read;
 use super::state::{self, Kind, Session, St};
+use super::term;
 
 const PAGE: &str = include_str!("page.html");
 const TOKEN_HEADER: &str = "x-decidle-token";
@@ -27,6 +28,8 @@ pub struct Server {
     port: u16,
     token: String,
     events: PathBuf,
+    /// Runs one terminal command. Tests replace it.
+    runner: fn(&[String]) -> Result<(), String>,
 }
 
 struct Request {
@@ -137,6 +140,9 @@ fn row(s: &Session) -> Value {
         "report_title": s.report_title,
         "report_goal": s.report_goal,
         "questions": s.questions,
+        "recommends": s.recommends,
+        "term": s.term,
+        "answer_text": if s.st == St::Stopped && s.term.is_some() { term::answer_text(s) } else { None },
         "report_url": s.report_html.as_deref().and_then(report_link),
         "decisions": s.decisions,
         "attention": s.attention.as_str(),
@@ -195,6 +201,7 @@ fn write_response(stream: &mut TcpStream, r: &Response) -> io::Result<()> {
         403 => "Forbidden",
         404 => "Not Found",
         409 => "Conflict",
+        502 => "Bad Gateway",
         _ => "Error",
     };
     let head = format!(
@@ -216,7 +223,11 @@ impl Server {
     pub fn bind(port: u16, events: PathBuf) -> io::Result<Server> {
         let listener = TcpListener::bind((Ipv4Addr::LOCALHOST, port))?;
         let port = listener.local_addr()?.port();
-        Ok(Server { listener, port, token: random_token()?, events })
+        Ok(Server { listener, port, token: random_token()?, events, runner: term::run })
+    }
+
+    pub fn set_runner(&mut self, runner: fn(&[String]) -> Result<(), String>) {
+        self.runner = runner;
     }
 
     pub fn port(&self) -> u16 {
@@ -276,6 +287,8 @@ impl Server {
             ("GET", "/api/sessions") => self.sessions(),
             ("POST", "/api/resolve") => self.with_target(req, |t| self.resolve(t)),
             ("POST", "/api/kill") => self.with_target(req, |t| self.kill(t)),
+            ("POST", "/api/focus") => self.with_target(req, |t| self.focus(t)),
+            ("POST", "/api/answer") => self.with_target(req, |t| self.answer(t)),
             _ => error(404, "not found"),
         }
     }
@@ -336,6 +349,34 @@ impl Server {
         }
     }
 
+    /// What both kill and answer need: the session is stopped at the stop the human saw, the
+    /// transcript shows no work since, and the recorded pid is still that agent. Returns the pid.
+    fn check_stopped(&self, session: &Session, t: &Target) -> Result<i64, Response> {
+        if session.st == St::Background {
+            return Err(error(409, BACKGROUND_REFUSAL));
+        }
+        if session.st != St::Stopped || session.last_stop.as_deref() != Some(t.resolves.as_str()) {
+            return Err(error(409, "見ていた停止のあとに新しい出来事がある"));
+        }
+        let (Some(pid), Some(started)) = (session.pid, session.pid_started) else {
+            return Err(error(409, "claude のプロセス番号の記録がない"));
+        };
+        // The log can miss a prompt line (a hook that timed out), so check the transcript too.
+        let Some(transcript) = session.transcript_path.as_deref().filter(|p| !p.is_empty()) else {
+            return Err(error(409, "会話記録の場所の記録がないので、止まっているか確かめられない"));
+        };
+        let stop_us = session.last_stop_us.unwrap_or(i64::MAX);
+        match activity::worked_since(Path::new(transcript), stop_us) {
+            Ok(false) => {}
+            Ok(true) => return Err(error(409, "会話記録では、停止のあとに作業が進んでいる")),
+            Err(e) => return Err(error(409, &format!("会話記録を読めないので、止まっているか確かめられない: {e}"))),
+        }
+        if !procinfo::is_same_claude(pid, started) {
+            return Err(error(409, "記録したプロセス番号は、記録した起動時刻の claude ではない"));
+        }
+        Ok(pid)
+    }
+
     /// Checks and signals while holding the append lock, so that no hook can append a prompt
     /// between the check and the signal.
     fn kill(&self, t: &Target) -> Response {
@@ -347,28 +388,10 @@ impl Server {
             Ok(s) => s,
             Err(r) => return r,
         };
-        if session.st == St::Background {
-            return error(409, BACKGROUND_REFUSAL);
-        }
-        if session.st != St::Stopped || session.last_stop.as_deref() != Some(t.resolves.as_str()) {
-            return error(409, "見ていた停止のあとに新しい出来事がある");
-        }
-        let (Some(pid), Some(started)) = (session.pid, session.pid_started) else {
-            return error(409, "claude のプロセス番号の記録がない");
+        let pid = match self.check_stopped(&session, t) {
+            Ok(pid) => pid,
+            Err(r) => return r,
         };
-        // The log can miss a prompt line (a hook that timed out), so check the transcript too.
-        let Some(transcript) = session.transcript_path.as_deref().filter(|p| !p.is_empty()) else {
-            return error(409, "会話記録の場所の記録がないので、止まっているか確かめられない");
-        };
-        let stop_us = session.last_stop_us.unwrap_or(i64::MAX);
-        match activity::worked_since(Path::new(transcript), stop_us) {
-            Ok(false) => {}
-            Ok(true) => return error(409, "会話記録では、停止のあとに作業が進んでいる"),
-            Err(e) => return error(409, &format!("会話記録を読めないので、止まっているか確かめられない: {e}")),
-        }
-        if !procinfo::is_same_claude(pid, started) {
-            return error(409, "記録したプロセス番号は、記録した起動時刻の claude ではない");
-        }
         // SAFETY: kill(2) with a pid checked above to be > 1.
         if unsafe { libc::kill(pid as libc::pid_t, libc::SIGTERM) } != 0 {
             let err = io::Error::last_os_error();
@@ -381,6 +404,54 @@ impl Server {
             Ok(_) => json_response(200, json!({ "ok": true })),
             Err(e) => error(500, &e.to_string()),
         }
+    }
+
+    /// Brings the session's terminal to the front. Nothing is recorded.
+    fn focus(&self, t: &Target) -> Response {
+        let session = match self.find(&t.session_id) {
+            Ok(s) => s,
+            Err(r) => return r,
+        };
+        let Some(commands) = term::focus_commands(&session) else {
+            return error(409, "このセッションの端末は、Home から前に出せない");
+        };
+        self.run_all(&commands)
+    }
+
+    /// Types the recommended options into the session's terminal. The check, the answer line
+    /// and the typing all happen under the append lock, so the agent cannot start a new turn
+    /// in between, and a second press finds the stop already answered.
+    fn answer(&self, t: &Target) -> Response {
+        let mut lock = match LogLock::acquire(&self.events, KILL_LOCK_TIMEOUT) {
+            Ok(l) => l,
+            Err(e) => return error(500, &e.to_string()),
+        };
+        let session = match self.find(&t.session_id) {
+            Ok(s) => s,
+            Err(r) => return r,
+        };
+        if let Err(r) = self.check_stopped(&session, t) {
+            return r;
+        }
+        let Some(text) = term::answer_text(&session) else {
+            return error(409, "勧めのない問いがあるか、送れない文字が入っているので、端末で答えてほしい");
+        };
+        let Some(commands) = term::answer_commands(&session, &text) else {
+            return error(409, "このセッションの端末には、Home から答えを送れない");
+        };
+        if let Err(e) = lock.append(events::resolution(&t.session_id, &session.cwd, "answer", &t.resolves)) {
+            return error(500, &e.to_string());
+        }
+        self.run_all(&commands)
+    }
+
+    fn run_all(&self, commands: &[Vec<String>]) -> Response {
+        for argv in commands {
+            if let Err(e) = (self.runner)(argv) {
+                return error(502, &format!("端末への命令が通らなかった: {e}"));
+            }
+        }
+        json_response(200, json!({ "ok": true }))
     }
 }
 

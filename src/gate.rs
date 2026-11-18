@@ -424,6 +424,11 @@ fn evaluate(input: &HookInput, cfg: &Config, data_dir: &Path, session_id: &str) 
         // Written by the agent for the Home card, not prompt or reply text. A report that
         // ran out of rounds may still carry a long question, so clip it here as well.
         questions: report.decisions.iter().map(|d| clip(d.question.trim(), cfg.question_max_chars)).collect(),
+        recommends: report
+            .decisions
+            .iter()
+            .map(|d| if d.options.iter().any(|o| o.label == d.recommend) { clip(d.recommend.trim(), 80) } else { String::new() })
+            .collect(),
         goal: clip(report.goal.trim(), 200),
     });
     Ok(Verdict::Stop(report, Some(json!({ "systemMessage": message }).to_string())))

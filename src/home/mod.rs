@@ -10,3 +10,4 @@ pub mod procinfo;
 pub mod read;
 pub mod server;
 pub mod state;
+pub mod term;

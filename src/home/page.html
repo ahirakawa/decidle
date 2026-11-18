@@ -6,127 +6,165 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Home</title>
 <style>
-  :root {
-    --bg: #f6f1e7; --panel: #fffdf8; --fg: #2a2520; --sub: #857b6e; --line: #e3dacb;
-    --decide: #b3261e; --permission: #c46a12; --need: #2b5d8a; --unknown: #8a6d1f; --noneed: #857b6e; --working: #4f7d4a; --background: #6c5b8e;
-    --cool: #e9e1d2; --cool-fg: #2a2520; --warm: #f0b44c; --warm-fg: #3b2600; --hot: #b3261e; --hot-fg: #fff;
-    color-scheme: light;
-  }
-  @media (prefers-color-scheme: dark) {
-    :root:not([data-theme="light"]) {
-      --bg: #101626; --panel: #182035; --fg: #eef0f6; --sub: #8f98b0; --line: #273250;
-      --decide: #ff7a70; --permission: #ffb15e; --need: #7fb4ea; --unknown: #e6c95c; --noneed: #8f98b0; --working: #8fd08a; --background: #b9a6e8;
-      --cool: #222c47; --cool-fg: #eef0f6; --warm: #e2a23a; --warm-fg: #1d1300; --hot: #e5483d; --hot-fg: #fff;
-      color-scheme: dark;
-    }
-  }
-  :root[data-theme="dark"] {
-    --bg: #101626; --panel: #182035; --fg: #eef0f6; --sub: #8f98b0; --line: #273250;
-    --decide: #ff7a70; --permission: #ffb15e; --need: #7fb4ea; --unknown: #e6c95c; --noneed: #8f98b0; --working: #8fd08a; --background: #b9a6e8;
-    --cool: #222c47; --cool-fg: #eef0f6; --warm: #e2a23a; --warm-fg: #1d1300; --hot: #e5483d; --hot-fg: #fff;
-    color-scheme: dark;
-  }
+  :root { --num: "Avenir Next Condensed", "DIN Condensed", "Helvetica Neue", sans-serif; --jp: "Hiragino Sans", "Yu Gothic UI", sans-serif; --min: "Hiragino Mincho ProN", "Yu Mincho", serif; }
+  body[data-skin="naname"] { --ink: #0b0c0f; --paper: #f1eee4; --ac: #c9f73a; --bg: #0b0c0f; --fg: #f1eee4; --decide: #ff6b57; --permission: #ffc23d; --need: #77b6ff; }
+  body[data-skin="shimen"] { --ink: #14130f; --paper: #fffdf6; --ac: #1f3fff; --ac2: #ff6a1f; --bg: #efe9dc; --fg: #14130f; --decide: #ff6a1f; --permission: #ffc400; --need: #8fb0ff; }
   * { box-sizing: border-box; }
-  body { margin: 0; background: var(--bg); color: var(--fg); font: 14px/1.5 "Hiragino Sans", -apple-system, sans-serif; }
-  .wrap { max-width: 760px; margin: 0 auto; padding: 14px 12px 20px; }
-  header { display: flex; align-items: center; justify-content: space-between; }
-  .brand { font-size: 12px; letter-spacing: .15em; color: var(--sub); }
-  .theme { font: inherit; font-size: 12px; background: none; border: 1px solid var(--line); color: var(--sub); border-radius: 4px; padding: 2px 8px; cursor: pointer; }
-  .hero { margin: 10px 0 16px; padding: 14px 16px; background: var(--panel); border: 1px solid var(--line); border-radius: 6px; }
-  .hero .big { font-family: "Hiragino Mincho ProN", "Yu Mincho", serif; font-size: 22px; font-weight: 700; line-height: 1.3; }
-  .hero .big b { font-size: 44px; font-variant-numeric: tabular-nums; margin-right: 4px; vertical-align: -4px; }
-  .hero .sub { color: var(--sub); font-size: 13px; margin-top: 4px; }
-  .hero .sub span[data-since] { color: var(--fg); font-weight: 700; }
-  h2 { font-family: "Hiragino Mincho ProN", "Yu Mincho", serif; font-size: 15px; margin: 18px 0 8px; padding-bottom: 4px; border-bottom: 2px solid var(--fg); display: flex; justify-content: space-between; }
-  h2.thin { border-bottom-width: 1px; color: var(--sub); }
-  h2 small { font-family: "Hiragino Sans", sans-serif; font-weight: 400; color: var(--sub); font-size: 12px; }
-  .item { display: grid; grid-template-columns: 92px 1fr; background: var(--panel); border: 1px solid var(--line); border-radius: 6px; margin-bottom: 10px; overflow: hidden; position: relative; }
-  .num { display: flex; flex-direction: column; align-items: center; justify-content: center; padding: 10px 4px; background: var(--cool); color: var(--cool-fg); font-variant-numeric: tabular-nums; }
-  .num[data-lv="warm"] { background: var(--warm); color: var(--warm-fg); }
-  .num[data-lv="hot"] { background: var(--hot); color: var(--hot-fg); }
-  .num .v { font-size: 40px; font-weight: 800; line-height: 1; letter-spacing: -.03em; }
-  .num .u { font-size: 12px; margin-top: 4px; }
-  .num .cap { font-size: 10px; opacity: .8; margin-top: 2px; }
-  .body { padding: 10px 12px 12px; min-width: 0; }
-  .state { display: inline-block; font-size: 12px; font-weight: 700; color: var(--c); border: 1.5px solid var(--c); border-radius: 3px; padding: 0 6px; }
-  .unknown .state { border-style: dashed; }
-  .decide { --c: var(--decide); } .permission { --c: var(--permission); } .need { --c: var(--need); } .unknown { --c: var(--unknown); }
-  .noneed { --c: var(--noneed); } .working { --c: var(--working); } .background { --c: var(--background); }
-  .folder { font-size: 18px; font-weight: 700; margin-top: 4px; word-break: break-all; padding-right: 70px; }
-  .meta { font-size: 12px; color: var(--sub); font-variant-numeric: tabular-nums; }
-  .meta .dup { color: var(--fg); font-weight: 700; }
-  .say { margin-top: 8px; font-size: 17px; font-weight: 700; line-height: 1.4; padding-left: 10px; border-left: 3px solid var(--c); word-break: break-word; }
-  .say.missing { font-size: 13px; font-weight: 400; color: var(--sub); border-left-style: dashed; border-left-color: var(--unknown); }
-  .decs { margin-top: 8px; font-size: 15px; font-weight: 700; color: var(--decide); }
-  ul.decs { padding-left: 1.2em; margin-bottom: 0; }
-  ul.decs li + li { margin-top: 2px; }
-  .report { margin-top: 8px; padding: 8px 10px; background: var(--bg); border-radius: 4px; font-size: 13px; word-break: break-word; }
-  .report a { color: var(--fg); font-weight: 600; }
-  .resolve { display: block; width: 100%; margin-top: 10px; font: inherit; font-size: 15px; font-weight: 700; padding: 9px; border-radius: 4px; border: none; background: var(--fg); color: var(--panel); cursor: pointer; }
-  .resolve:hover { opacity: .88; }
-  .kill { position: absolute; top: 8px; right: 8px; font: inherit; font-size: 11px; color: var(--hot); background: var(--panel); border: 1px solid var(--hot); border-radius: 3px; padding: 1px 7px; cursor: pointer; }
-  .kill:hover { background: var(--hot); color: var(--hot-fg); }
-  .quiet { grid-template-columns: 72px 1fr; background: transparent; }
-  .quiet .num .cap { white-space: nowrap; font-size: 9px; }
-  .quiet .num { background: transparent; color: var(--sub); border-right: 1px solid var(--line); }
-  .quiet .num .v { font-size: 24px; }
-  .quiet .folder { font-size: 15px; }
-  .quiet .say { font-size: 14px; font-weight: 400; }
-  .quiet .resolve { background: transparent; color: var(--fg); border: 1.5px solid var(--fg); padding: 6px; font-size: 13px; }
-  .line { display: grid; grid-template-columns: 92px 1fr auto; align-items: baseline; gap: 0 10px; padding: 8px 4px; border-bottom: 1px solid var(--line); }
-  .line .st { font-size: 12px; font-weight: 700; color: var(--c); }
-  .line .f { font-weight: 700; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  .line .a { font-size: 12px; color: var(--sub); font-variant-numeric: tabular-nums; }
-  .line .meta, .line .r { grid-column: 2 / 4; }
-  .line .r { font-size: 13px; word-break: break-word; }
-  .line .r a { color: var(--fg); }
-  @media (min-width: 1100px) {
-    .wrap { max-width: 1400px; }
-    .cols { display: grid; grid-template-columns: 3fr 2fr; gap: 24px; align-items: start; }
-  }
-  .empty { color: var(--sub); padding: 12px 4px; }
-  #err { color: var(--decide); margin-top: 10px; }
-  footer { margin-top: 18px; color: var(--sub); font-size: 12px; display: flex; flex-wrap: wrap; gap: 4px 14px; }
+  html, body { margin: 0; }
+  body { background: var(--bg); color: var(--fg); font: 14px/1.5 var(--jp); min-height: 100vh; overflow-x: hidden; position: relative; padding-bottom: 54px; }
+  /* texture: halftone dots fading in from one corner */
+  body::before { content: ""; position: fixed; inset: 0; pointer-events: none; background-image: radial-gradient(currentColor 1.3px, transparent 1.5px); background-size: 9px 9px; opacity: .13;
+    -webkit-mask-image: linear-gradient(200deg, #000, transparent 46%); mask-image: linear-gradient(200deg, #000, transparent 46%); }
+  [data-skin="naname"]::after { content: ""; position: fixed; inset: 0; pointer-events: none; background: repeating-linear-gradient(0deg, #ffffff0d 0 1px, transparent 1px 3px); }
+  .k-decide { --c: var(--decide); } .k-permission { --c: var(--permission); } .k-need { --c: var(--need); }
+
+  header { position: relative; height: 232px; overflow: hidden; }
+  .big { position: absolute; font-family: var(--num); font-weight: 900; line-height: 1; letter-spacing: -.045em; }
+  .big.thump { animation: thump .32s cubic-bezier(.2, 1.9, .4, 1); } @keyframes thump { from { transform: scale(1.35) rotate(-6deg); } }
+  .title { position: absolute; font-weight: 900; } .title small { display: block; font: 700 10px var(--num); letter-spacing: .3em; }
+  .issue { position: absolute; font: 700 11px/1.5 var(--num); letter-spacing: .22em; } .issue b { display: block; font-size: 28px; letter-spacing: .02em; line-height: 1; }
+  .tape { position: absolute; left: -12%; width: 124%; height: 13px; background: repeating-linear-gradient(-45deg, var(--ac) 0 12px, var(--ink) 12px 24px); }
+  .roll { position: absolute; left: -12%; width: 124%; background: var(--fg); color: var(--bg); font: 900 11px var(--jp); white-space: nowrap; overflow: hidden; padding: 3px 0; }
+  .roll div { display: inline-block; animation: roll 30s linear infinite; } @keyframes roll { to { transform: translateX(-50%); } }
+  .roll b { font: italic 900 12px var(--num); letter-spacing: .22em; margin: 0 12px; }
+
+  /* naname header */
+  [data-skin="naname"] .shard { position: absolute; top: 0; right: 0; width: 78%; height: 208px; background: var(--ac); clip-path: polygon(38% 0, 100% 0, 100% 100%, 0 46%); transition: background .4s; }
+  [data-skin="naname"] .shard.b { width: 60%; height: 232px; background: #24262e; clip-path: polygon(70% 30%, 100% 18%, 100% 100%, 52% 86%); }
+  [data-skin="naname"].clear .shard:not(.b) { background: #3a3d48; }
+  [data-skin="naname"] .big { left: 10px; top: -30px; font-size: 250px; font-style: italic; color: #fff; mix-blend-mode: difference; }
+  [data-skin="naname"] .title { right: 14px; top: 44px; color: var(--ink); font-size: 25px; transform: rotate(18deg); transform-origin: right top; }
+  [data-skin="naname"] .issue { left: 18px; bottom: 30px; opacity: .65; font-style: italic; } [data-skin="naname"] .issue b { font-size: 15px; display: inline; margin-right: 8px; }
+  [data-skin="naname"] .tape { top: 196px; transform: rotate(-5deg); } [data-skin="naname"] .roll { top: 207px; transform: rotate(-5deg); }
+  [data-skin="naname"] .block { display: none; }
+  /* shimen header */
+  [data-skin="shimen"] header { border-bottom: 3px solid var(--ink); }
+  [data-skin="shimen"] .shard { display: none; }
+  [data-skin="shimen"] .block { position: absolute; left: 96px; top: 50px; width: 190px; height: 118px; background: var(--ac); transition: background .4s, transform .4s; }
+  [data-skin="shimen"].clear .block { background: var(--ac2); transform: rotate(-6deg); }
+  [data-skin="shimen"] .big { left: 58px; top: -12px; font-size: 226px; } [data-skin="shimen"] .big.pad::before { content: "0"; }
+  [data-skin="shimen"] .title { left: 16px; top: 14px; writing-mode: vertical-rl; font: 900 29px/1 var(--min); letter-spacing: .12em; } [data-skin="shimen"] .title small { display: none; }
+  [data-skin="shimen"] .issue { right: 14px; top: 14px; text-align: right; }
+  [data-skin="shimen"] .tape { bottom: 22px; height: 9px; } [data-skin="shimen"] .roll { bottom: 0; }
+
+  nav { position: relative; margin-top: 14px; }
+  .item { display: block; border: 0; color: inherit; font: inherit; text-align: left; cursor: pointer; }
+  .item .in { display: grid; grid-template-columns: 38px 1fr auto; align-items: center; gap: 2px 10px; }
+  .no { font: italic 900 25px/1 var(--num); opacity: .38; } .sel .no { opacity: 1; }
+  .nm { display: block; font-weight: 900; font-size: 19px; line-height: 1.2; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .stk { display: inline-block; font-size: 10.5px; font-weight: 900; padding: 0 7px; background: var(--c); color: #111; transform: rotate(-2.5deg); box-shadow: 2px 2px 0 #0007; margin-top: 2px; }
+  .wt { font: italic 900 27px/1 var(--num); white-space: nowrap; } .wt small { font: 700 11px var(--jp); margin-left: 2px; }
+  .first .item { animation: enter .34s cubic-bezier(.2, 1.3, .4, 1) backwards; animation-delay: calc(var(--i) * 55ms); }
+  [data-skin="naname"] .item { width: calc(100% - 26px); margin: 0 0 7px -16px; padding: 8px 20px 8px 34px; background: #1a1c23; transform: skewX(-14deg); transition: transform .16s cubic-bezier(.2, 1.9, .4, 1), background .1s; }
+  [data-skin="naname"] .item .in { transform: skewX(14deg); }
+  [data-skin="naname"] .item.sel { background: var(--ac); color: var(--ink); transform: skewX(-14deg) translateX(26px); }
+  [data-skin="naname"] .item.out { transform: skewX(-14deg) translateX(125%); transition: transform .22s ease-in; }
+  [data-skin="naname"] .first .item { --from: skewX(-14deg) translateX(-115%); }
+  [data-skin="shimen"] nav { padding: 0 16px; }
+  [data-skin="shimen"] .item { width: 100%; margin-bottom: 9px; padding: 8px 14px 7px 10px; border: 3px solid var(--ink); background: var(--paper); transform: rotate(var(--r)); transition: transform .15s cubic-bezier(.2, 1.9, .4, 1), box-shadow .15s, background .1s; }
+  [data-skin="shimen"] .item.sel { background: var(--ink); color: var(--paper); transform: rotate(0) translate(-4px, -4px); box-shadow: 9px 9px 0 var(--ac); }
+  [data-skin="shimen"] .item.out { transform: translateY(40px) rotate(14deg); opacity: 0; transition: transform .22s ease-in, opacity .22s; }
+  [data-skin="shimen"] .wt { font-style: normal; font-size: 33px; } [data-skin="shimen"] .no { font-style: normal; }
+  [data-skin="shimen"] .first .item { --from: translateY(-30px) rotate(-8deg); }
+  @keyframes enter { from { transform: var(--from); opacity: 0; } }
+
+  .sheet { position: relative; }
+  .sheet .lab { position: absolute; font-weight: 900; font-size: 12px; }
+  .sheet .say { font-weight: 900; line-height: 1.5; margin: 4px 0 8px; } .sheet .meta { font-size: 12px; opacity: .8; }
+  .sheet.jolt { animation: jolt .26s; } @keyframes jolt { 30% { transform: translateX(6px) rotate(.6deg); } 60% { transform: translateX(-4px); } }
+  .cmds { display: flex; gap: 12px; margin-top: 14px; flex-wrap: wrap; align-items: center; }
+  .cmd { font: 900 14px var(--jp); cursor: pointer; } .cmd.end { margin-left: auto; opacity: .6; background: transparent !important; box-shadow: none !important; border: 0 !important; padding: 6px 2px; }
+  [data-skin="naname"] .sheet { margin: 20px 18px 0 22px; background: var(--paper); color: var(--ink); padding: 26px 20px 18px; clip-path: polygon(0 5%, 100% 0, 97% 100%, 3% 96%); }
+  [data-skin="naname"] .sheet .lab { top: 8px; left: 14px; letter-spacing: .1em; border-bottom: 3px solid var(--ink); } [data-skin="naname"] .sheet .say { font-size: 19px; }
+  [data-skin="naname"] .cmd { border: 0; background: var(--ink); color: var(--paper); padding: 8px 20px; transform: skewX(-14deg); transition: transform .12s; margin-left: 4px; }
+  [data-skin="naname"] .cmd span { display: inline-block; transform: skewX(14deg); } [data-skin="naname"] .cmd:hover { transform: skewX(-14deg) translateY(-3px); }
+  [data-skin="naname"] .cmd.go { box-shadow: 5px 5px 0 var(--ac); } [data-skin="naname"] .cmd.sub { background: transparent; color: var(--ink); box-shadow: inset 0 0 0 2.5px var(--ink); } [data-skin="naname"] .cmd.end { color: var(--ink); }
+  [data-skin="shimen"] .sheet { margin: 20px 20px 0 26px; background: var(--ac); color: #fff; padding: 18px; transform: rotate(1.2deg); }
+  [data-skin="shimen"] .sheet .lab { top: -12px; left: -8px; background: var(--ac2); color: var(--ink); padding: 2px 10px; transform: rotate(-4deg); } [data-skin="shimen"] .sheet .say { font: 900 20px/1.5 var(--min); }
+  [data-skin="shimen"] .cmd { border: 3px solid var(--ink); background: var(--paper); color: var(--ink); padding: 6px 18px; box-shadow: 5px 5px 0 var(--ink); transition: transform .1s, box-shadow .1s; }
+  [data-skin="shimen"] .cmd:hover { transform: translate(-2px, -2px); box-shadow: 7px 7px 0 var(--ink); } [data-skin="shimen"] .cmd:active { transform: translate(4px, 4px); box-shadow: 1px 1px 0 var(--ink); }
+  [data-skin="shimen"] .cmd.go { background: var(--ac2); } [data-skin="shimen"] .cmd.end { color: #fff; }
+
+  .clearmsg { margin: 26px 22px 0; font-weight: 900; font-size: 42px; line-height: 1.15; } .clearmsg small { display: block; font: 500 13px var(--jp); margin-top: 10px; opacity: .75; }
+  .clearmsg .stk { font-size: 13px; padding: 2px 12px; background: var(--ac); transform: rotate(-5deg); margin-bottom: 10px; } [data-skin="shimen"] .clearmsg .stk { color: #fff; } [data-skin="shimen"] .clearmsg { font-family: var(--min); }
+  [data-skin="naname"] .clearmsg { transform: rotate(-5deg); transform-origin: left; }
+  .work { margin: 26px 16px 0; padding-top: 10px; border-top: 3px solid var(--fg); display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+  .work b { font: 900 11px var(--num); letter-spacing: .24em; margin-right: 4px; }
+  .work span { border: 2px solid var(--fg); padding: 1px 9px; font-size: 12px; font-weight: 700; } .work span:nth-of-type(odd) { transform: rotate(-2deg); } .work span.fyi { border-style: dashed; }
+  .work span i { font-style: normal; display: inline-block; margin-right: 5px; animation: turn 2.4s steps(4) infinite; } @keyframes turn { to { transform: rotate(360deg); } }
+  .skin { position: fixed; right: 8px; bottom: 8px; display: flex; gap: 0; font: 900 11px var(--jp); z-index: 2; }
+  .skin button { border: 2px solid var(--fg); background: var(--bg); color: var(--fg); font: inherit; padding: 3px 10px; cursor: pointer; } .skin button[aria-pressed="true"] { background: var(--fg); color: var(--bg); }
+  @media (prefers-reduced-motion: reduce) { * { animation: none !important; transition: none !important; } }
+
+  /* v3: 飾りを引いた版。構図（大きな数字、斜めの面、選んだ行の動き）だけ残す */
+  body::before, [data-skin="naname"]::after { display: none; }
+  .tape, .roll { display: none; }
+  [data-skin="naname"] .shard.b { display: none; }
+  [data-skin="naname"] .issue { bottom: 8px; }
+  .stk { background: none; color: var(--c); padding: 0; transform: none; box-shadow: none; font-size: 11px; letter-spacing: .04em; }
+  .sel .stk { color: inherit; }
+  .clearmsg .stk { background: none; color: inherit; padding: 0; transform: none; opacity: .7; }
+  [data-skin="shimen"] .clearmsg .stk { color: inherit; }
+  [data-skin="shimen"] .item { transform: none; }
+  [data-skin="shimen"] .item.sel { transform: translate(-3px, -3px); box-shadow: 6px 6px 0 var(--ac); }
+  [data-skin="shimen"] .sheet, [data-skin="shimen"] .sheet .lab { transform: none; }
+  [data-skin="shimen"].clear .block { transform: none; }
+  [data-skin="naname"] .sheet { clip-path: none; }
+  [data-skin="naname"] .clearmsg { transform: none; }
+  .work span:nth-of-type(odd) { transform: none; }
+  .work span i { animation: none; }
+  .big.thump { animation: none; } .sheet.jolt { animation: none; }
+  [data-skin="naname"] .big { mix-blend-mode: normal; z-index: 1; }
+  [data-skin="shimen"] .stk { color: inherit; opacity: .75; }
+
+  /* Home: the real page */
+  nav, .work { max-width: 860px; }
+  .item { user-select: none; }
+  [data-skin="naname"] .item:hover:not(.sel) { background: #262933; }
+  [data-skin="shimen"] .item:hover:not(.sel) { background: #f3eedf; }
+  .item:focus-visible, .cmd:focus-visible, .skin button:focus-visible { outline: 3px solid var(--ac); outline-offset: 2px; }
+  .item.quiet:not(.sel) { opacity: .62; }
+  .sec { margin: 16px 18px 8px; font: 900 11px var(--num); letter-spacing: .2em; opacity: .7; }
+  [data-skin="naname"] nav .sheet { margin: 2px 18px 16px 22px; }
+  [data-skin="shimen"] nav .sheet { margin: 14px 4px 20px 10px; }
+  .sheet .say ul { margin: 0; padding-left: 1.15em; } .sheet .say li { margin-bottom: 4px; }
+  .sheet .rec { display: block; font: 600 12.5px/1.5 var(--jp); opacity: .85; }
+  .sheet .send { margin-top: 10px; padding: 6px 10px; border: 1.5px dashed currentColor; font-size: 12px; line-height: 1.6; opacity: .9; }
+  .sheet .send b { display: block; font-size: 10.5px; letter-spacing: .08em; }
+  a.cmd { text-decoration: none; display: inline-block; }
+  .k-unknown { --c: var(--permission); } .k-noneed { --c: currentColor; }
+  .work span small { font: inherit; opacity: .7; margin-left: 6px; }
+  .work span span { border: 0; padding: 0; transform: none; }
+  #err { position: fixed; left: 0; right: 0; top: 0; z-index: 3; background: #b3261e; color: #fff; font-weight: 700; font-size: 13px; padding: 6px 14px; }
+  .foot { margin: 14px 18px 0; font-size: 11px; opacity: .55; }
 </style>
 </head>
-<body>
-<div class="wrap">
-  <header><span class="brand">DECIDLE HOME</span><button class="theme" id="theme"></button></header>
-  <div id="err" hidden></div>
-  <div class="hero" id="hero"></div>
-  <div class="cols" id="main"></div>
-  <footer id="foot"></footer>
-</div>
+<body tabindex="0" data-skin="naname">
+<div id="err" hidden></div>
+<header><div class="shard b"></div><div class="shard"></div><div class="block"></div>
+  <div class="big" id="n"></div><div class="title"><small>WAITING FOR YOU</small>あなた待ち</div>
+  <div class="issue"><b id="clk"></b><span id="date"></span></div></header>
+<nav id="list" class="first"></nav><div class="work" id="work"></div><div class="foot" id="foot"></div>
+<div class="skin" id="skin"></div>
 <script>
 "use strict";
 const TOKEN = document.querySelector('meta[name="decidle-token"]').content;
 // The kind of a row. A stopped row splits by attention: need (yes), noneed (no), unknown.
 const kind = s => s.state === "stopped" ? ({ yes: "need", no: "noneed" })[s.attention] || "unknown" : s.state;
-const LABEL = {
-  decide: "決めてほしいことあり", permission: "許可待ち", need: "止まっている・対応が要", unknown: "止まっている・要否不明",
-  noneed: "止まっている・対応は不要", working: "作業中", background: "裏で作業中",
-};
-const MISSING = "要否不明: 返事の最後に「Home: 要/不要 …」の一言がない、または形に合わない";
-// Resolve and kill are offered on stopped rows only. A background row gets no buttons
-// (the server also refuses both with 409).
+const LABEL = { decide: "決めてほしい", permission: "許可待ち", need: "確認してほしい", unknown: "止まっている", noneed: "対応は不要", working: "作業中", background: "裏で作業中" };
+const MARK = { decide: "◆", permission: "▲", need: "●", unknown: "●", noneed: "✓" };
+const MISSING = "一言なしで止まっている";
+// The buttons are offered on stopped rows only. The server refuses the others with 409.
 const canClose = s => s.state === "decide" || s.state === "stopped";
-let sessions = [];
+let data = { sessions: [], skipped: 0 }, sel = null, drawn = "";
 
 const since = s => Date.parse(s.last_ts);
-function elapsed(t) {
-  const s = Math.max(0, Math.floor((Date.now() - t) / 1000));
-  if (s < 60) return s + "秒";
-  if (s < 3600) return Math.floor(s / 60) + "分";
-  return Math.floor(s / 3600) + "時間" + Math.floor(s % 3600 / 60) + "分";
-}
 function split(t) {
   const sec = Math.max(0, Math.floor((Date.now() - t) / 1000)), m = Math.floor(sec / 60);
   if (m < 1) return [String(sec), "秒"];
   if (m < 60) return [String(m), "分"];
   return [Math.floor(m / 60) + ":" + String(m % 60).padStart(2, "0"), "時間"];
 }
-const level = t => { const m = (Date.now() - t) / 60000; return m >= 20 ? "hot" : m >= 5 ? "warm" : "cool"; };
-
 function h(tag, attrs, ...kids) {
   const el = document.createElement(tag);
   for (const [k, v] of Object.entries(attrs || {})) {
@@ -135,10 +173,9 @@ function h(tag, attrs, ...kids) {
     else if (k === "data") Object.assign(el.dataset, v);
     else el.setAttribute(k, v);
   }
-  for (const k of kids.flat()) if (k != null && k !== false) el.append(k);
+  for (const k of kids.flat(3)) if (k != null && k !== false) el.append(k);
   return el;
 }
-
 async function post(path, s) {
   try {
     const res = await fetch(path, {
@@ -162,127 +199,106 @@ function startLabel(s) {
   return "開始 " + (d.toDateString() === now.toDateString() ? hm : (d.getMonth() + 1) + "/" + d.getDate() + " " + hm);
 }
 function kill(s) {
-  if (confirm(s.folder + "(" + startLabel(s) + ")の claude を終了する。よいか。")) post("/api/kill", s);
+  if (confirm(s.folder + "(" + startLabel(s) + ")の " + s.agent + " を終了する。よいか。")) post("/api/kill", s);
 }
+const name = s => s.folder + (data.sessions.filter(x => x.folder === s.folder).length > 1 ? " " + startLabel(s).replace("開始 ", "") + "〜" : "");
+const btn = (cls, text, onclick, title) => h("button", { class: "cmd " + cls, onclick, title: title || "" }, h("span", {}, text));
 
-const THEMES = ["auto", "light", "dark"], TLABEL = { auto: "画面: 自動", light: "画面: 明るい", dark: "画面: 暗い" };
-let theme = "auto";
-try { theme = localStorage.getItem("home-theme") || "auto"; } catch (_) {}
-if (!THEMES.includes(theme)) theme = "auto";
-function applyTheme() {
-  if (theme === "auto") delete document.documentElement.dataset.theme; else document.documentElement.dataset.theme = theme;
-  document.getElementById("theme").textContent = TLABEL[theme];
-}
-document.getElementById("theme").addEventListener("click", () => {
-  theme = THEMES[(THEMES.indexOf(theme) + 1) % 3];
-  try { localStorage.setItem("home-theme", theme); } catch (_) {}
-  applyTheme();
-});
-
-function tick() {
-  document.querySelectorAll("[data-since]").forEach(el => { el.textContent = elapsed(+el.dataset.since); });
-  document.querySelectorAll(".num").forEach(el => {
-    const t = +el.dataset.from, [v, u] = split(t);
-    if (!el.closest(".quiet")) el.dataset.lv = level(t);
-    el.querySelector(".v").textContent = v;
-    el.querySelector(".u").textContent = u;
-  });
-  const n = sessions.filter(s => s.waits_for_human).length;
-  document.title = (n ? "(" + n + ") " : "") + "Home";
-}
-
-function meta(s) {
-  const dup = sessions.filter(x => x.folder === s.folder).length > 1;
-  return h("div", { class: "meta", title: s.session_id }, h("span", { class: dup ? "dup" : "" }, startLabel(s)),
-    s.agent === "codex" ? " · Codex" : null);
-}
 function say(s) {
-  if (s.state === "permission") return h("div", { class: "say" }, "ターミナルで許可を出してほしい");
-  if (s.note) return h("div", { class: "say" }, s.note);
-  if (canClose(s)) return h("div", { class: "say missing" }, MISSING);
-  return null;
+  if (s.state === "permission") return "ターミナルで許可を出してほしい";
+  const qs = s.questions || [], rs = s.recommends || [];
+  if (s.state === "decide" && qs.length) return h("ul", {}, qs.map((q, i) => h("li", {}, q, rs[i] ? h("span", { class: "rec" }, "勧め: " + rs[i]) : null)));
+  if (s.state === "decide") return "決めてほしいこと " + s.decisions + " 件";
+  return s.note || MISSING;
 }
-// The questions the agent wrote in the report (40 characters or fewer each). Lines written
-// before questions were recorded only have the count.
-function decs(s) {
-  if (!(s.report_title && s.decisions > 0)) return null;
-  const qs = s.questions || [];
-  if (!qs.length) return h("div", { class: "decs" }, "決めてほしいこと " + s.decisions + " 件");
-  return h("ul", { class: "decs" }, qs.map(q => h("li", {}, q)));
+// The panel under the selected row: what the agent wants, and what the human can do from here.
+function sheet(s) {
+  const k = kind(s), close = canClose(s);
+  const first = s.answer_text ? "answer" : s.term ? "focus" : "resolve";
+  return h("section", { class: "sheet" },
+    h("span", { class: "lab" }, s.folder + " ／ " + LABEL[k]),
+    h("div", { class: "say" }, say(s)),
+    h("div", { class: "meta", title: s.session_id }, [s.report_goal ? "目的: " + s.report_goal : null, startLabel(s), s.agent === "codex" ? "Codex" : null, s.term].filter(Boolean).join(" ・ ")),
+    s.answer_text ? h("div", { class: "send" }, h("b", {}, "「勧めで答える」で端末に送る文"), s.answer_text) : null,
+    h("div", { class: "cmds" },
+      s.answer_text ? btn("go", "勧めで答える", () => post("/api/answer", s), "上の文を端末に入力して Enter を押す") : null,
+      close && s.term ? btn(first === "focus" ? "go" : "sub", "端末へ行く", () => post("/api/focus", s), "このセッションの端末を前に出す") : null,
+      s.report_url ? h("a", { class: "cmd sub", href: s.report_url, target: "_blank", rel: "noopener" }, h("span", {}, "報告を開く")) : null,
+      close ? btn(first === "resolve" ? "go" : "sub", "外す", () => post("/api/resolve", s), "見たので一覧から外す。エージェントには何も送らない") : null,
+      close ? btn("end", "終了…", () => kill(s)) : null));
 }
-function reportLink(s) {
-  return s.report_url ? h("a", { href: s.report_url, title: "報告のページを開く" }, s.report_title) : s.report_title;
+function item(s, i) {
+  const k = kind(s), on = s.session_id === sel;
+  return [h("button", { class: "item k-" + k + (on ? " sel" : "") + (s.waits_for_human ? "" : " quiet"), style: "--i:" + i, "aria-expanded": String(on), title: s.cwd,
+      onclick: () => { sel = s.session_id; draw(); } },
+    h("span", { class: "in" }, h("span", { class: "no" }, String(i + 1).padStart(2, "0")),
+      h("span", {}, h("span", { class: "nm" }, name(s)), h("span", { class: "stk" }, MARK[k] + " " + LABEL[k])),
+      h("span", { class: "wt", data: { from: since(s) } }, h("span", { class: "v" }), h("small", {})))),
+    on ? sheet(s) : null].filter(Boolean);
 }
-function item(s) {
-  const quiet = !s.waits_for_human;
-  return h("div", { class: "item " + kind(s) + (quiet ? " quiet" : "") },
-    h("div", { class: "num", data: { from: since(s) } },
-      h("span", { class: "v" }), h("span", { class: "u" }), h("span", { class: "cap" }, quiet ? "止まってから" : "待たせている")),
-    h("div", { class: "body" },
-      h("span", { class: "state" }, LABEL[kind(s)] || s.state),
-      h("div", { class: "folder", title: s.cwd }, s.folder),
-      meta(s),
-      say(s),
-      decs(s),
-      s.report_title ? h("div", { class: "report" }, "報告: ", reportLink(s)) : null,
-      canClose(s) ? h("button", { class: "resolve", onclick: () => post("/api/resolve", s) }, quiet ? "解決" : "見た・解決") : null),
-    canClose(s) ? h("button", { class: "kill", onclick: () => kill(s) }, "終了…") : null);
+function rows() {
+  const all = data.sessions.filter(s => s.state !== "working" && s.state !== "background");
+  return [all.filter(s => s.waits_for_human), all.filter(s => !s.waits_for_human)];
 }
-function line(s) {
-  return h("div", { class: "line " + kind(s) },
-    h("span", { class: "st" }, LABEL[kind(s)] || s.state),
-    h("span", { class: "f", title: s.cwd }, s.folder),
-    h("span", { class: "a" }, h("span", { data: { since: since(s) } }), "前に更新"),
-    meta(s),
-    s.note ? h("div", { class: "r" }, s.note) : null,
-    s.report_title ? h("div", { class: "r" }, "前回: ", reportLink(s)) : null);
+function tick() {
+  document.querySelectorAll("[data-from]").forEach(el => {
+    const [v, u] = split(+el.dataset.from);
+    el.querySelector(".v").textContent = v; el.querySelector("small").textContent = u;
+  });
+  const now = new Date();
+  document.getElementById("clk").textContent = now.getHours() + ":" + String(now.getMinutes()).padStart(2, "0");
+  document.getElementById("date").textContent = (now.getMonth() + 1) + "." + now.getDate() + " " + ["SUN", "MON", "TUE", "WED", "THU", "FRI", "SAT"][now.getDay()];
 }
-
-function render(data) {
+function draw() {
   // The server sorts the rows: those that wait for a human first, newest first within a rank.
-  sessions = data.sessions;
-  const wait = sessions.filter(s => s.waits_for_human);
-  const done = sessions.filter(s => !s.waits_for_human && canClose(s));
-  const busy = sessions.filter(s => !s.waits_for_human && !canClose(s));
-  const oldest = wait.length ? Math.min(...wait.map(since)) : null;
-  const decs = wait.reduce((n, s) => n + (s.report_title ? s.decisions : 0), 0);
-  document.getElementById("hero").replaceChildren(
-    wait.length
-      ? h("div", { class: "big" }, h("b", {}, String(wait.length)), "件があなたを待っている")
-      : h("div", { class: "big" }, sessions.length ? "待っているセッションはない" : "表に出すセッションはない"),
-    h("div", { class: "sub" },
-      wait.length ? ["いちばん長い待ち ", h("span", { data: { since: oldest } }), " ・ 決めてほしいこと 合計 " + decs + " 件 ・ "] : null,
-      "対応は不要の停止 " + done.length + " 件"));
-  document.getElementById("main").replaceChildren(
-    h("section", {},
-      h("h2", {}, "人を待っている", h("small", {}, wait.length + " 件")),
-      wait.length ? wait.map(item) : h("div", { class: "empty" }, "なし"),
-      h("h2", { class: "thin" }, "止まっている・対応は不要", h("small", {}, done.length + " 件")),
-      done.length ? done.map(item) : h("div", { class: "empty" }, "なし")),
-    h("section", {},
-      h("h2", {}, "作業中", h("small", {}, busy.length + " 件")),
-      busy.length ? busy.map(line) : h("div", { class: "empty" }, "なし")));
-  document.getElementById("foot").replaceChildren(
-    data.skipped > 0 ? h("span", {}, "読めなかった行: " + data.skipped + " 件") : "",
-    h("span", {}, "5秒ごとに取り直す"));
+  const [wait, done] = rows(), all = wait.concat(done), sk = document.body.dataset.skin;
+  if (!all.some(s => s.session_id === sel)) sel = all.length ? all[0].session_id : null;
+  document.title = (wait.length ? "(" + wait.length + ") " : "") + "Home";
+  // Rebuild only when something changed, so that a click is not lost to the 5 second refresh.
+  const sig = JSON.stringify([data, sel, sk]);
+  if (sig === drawn) return tick();
+  drawn = sig;
+  document.body.classList.toggle("clear", !wait.length);
+  const n = document.getElementById("n");
+  n.textContent = wait.length; n.className = "big" + (wait.length < 10 ? " pad" : "");
+  const list = document.getElementById("list");
+  list.replaceChildren(...wait.map(item).flat(),
+    ...(done.length ? [h("div", { class: "sec" }, "対応は不要"), ...done.map((s, i) => item(s, wait.length + i)).flat()] : []),
+    ...(all.length ? [] : [h("div", { class: "clearmsg" }, h("span", { class: "stk" }, "ALL CLEAR"), h("div", {}, "待ちなし。"), h("small", {}, "そのまま自分の作業を続けて大丈夫。"))]));
+  setTimeout(() => list.classList.remove("first"), 700);
+  const busy = data.sessions.filter(s => s.state === "working" || s.state === "background");
+  document.getElementById("work").replaceChildren(busy.length ? h("b", {}, "NOW WORKING") : "",
+    ...busy.map(s => h("span", { title: (s.note || "") + " " + s.cwd }, h("i", {}, "◐"), name(s) + (s.state === "background" ? "(裏)" : ""),
+      h("small", { data: { from: since(s) } }, h("span", { class: "v" }), h("small", {})))));
+  document.getElementById("foot").textContent = (data.skipped > 0 ? "読めなかった行: " + data.skipped + " 件 ・ " : "") + "5秒ごとに取り直す ・ ↑↓ で選ぶ ・ T で見た目を替える";
+  document.getElementById("skin").replaceChildren(...[["naname", "斜め"], ["shimen", "紙面"]].map(([v, t]) => h("button", { "aria-pressed": String(v === sk), onclick: () => skin(v) }, t)));
   tick();
 }
-
+function skin(v) { document.body.dataset.skin = v; try { localStorage.setItem("decidle-skin", v); } catch (_) {} draw(); }
+addEventListener("keydown", e => {
+  if (e.metaKey || e.ctrlKey || e.altKey) return;
+  if (e.key.toLowerCase() === "t") return skin(document.body.dataset.skin === "naname" ? "shimen" : "naname");
+  const all = rows().flat(), i = all.findIndex(s => s.session_id === sel);
+  if (!all.length || (e.key !== "ArrowDown" && e.key !== "ArrowUp")) return;
+  sel = all[(i + (e.key === "ArrowDown" ? 1 : all.length - 1)) % all.length].session_id;
+  e.preventDefault(); draw();
+});
 async function refresh() {
   const err = document.getElementById("err");
   try {
     const res = await fetch("/api/sessions", { cache: "no-store" });
-    const data = await res.json();
-    if (!res.ok) throw new Error(data.error || res.status);
-    render(data);
+    const body = await res.json();
+    if (!res.ok) throw new Error(body.error || res.status);
+    data = { sessions: body.sessions, skipped: body.skipped };
+    draw();
     err.hidden = true;
   } catch (e) {
     err.textContent = "取得できない: " + e.message;
     err.hidden = false;
   }
 }
-
-applyTheme();
+let saved = null; try { saved = localStorage.getItem("decidle-skin"); } catch (_) {}
+if (saved === "shimen") document.body.dataset.skin = saved;
 refresh();
 setInterval(refresh, 5000);
 setInterval(tick, 1000);

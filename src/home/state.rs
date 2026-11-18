@@ -17,6 +17,9 @@ pub enum St {
     /// kill lines do not apply, as in every state other than Stopped.
     Background,
     Resolved,
+    /// The answer button sent the report's recommended options to the terminal. Hidden like
+    /// Resolved; the prompt the terminal receives brings the row back as Working.
+    Answered,
     Ended,
 }
 
@@ -28,6 +31,7 @@ pub enum Kind {
     Stop,
     Resolved,
     Kill,
+    Answer,
     End,
     /// Codex: a turn was interrupted (also when the human denied an approval).
     Interrupt,
@@ -42,6 +46,7 @@ impl Kind {
             "stop" => Kind::Stop,
             "resolved" => Kind::Resolved,
             "kill" => Kind::Kill,
+            "answer" => Kind::Answer,
             "end" => Kind::End,
             "interrupt" => Kind::Interrupt,
             _ => return None,
@@ -75,6 +80,12 @@ pub struct Event {
     /// stop only: the questions of the report's decisions, and its goal.
     pub questions: Vec<String>,
     pub report_goal: Option<String>,
+    /// stop only: the recommended option of each decision, in the order of `questions`.
+    pub recommends: Vec<String>,
+    /// start only: the terminal the agent runs in (cmux or herdr) and its ids there.
+    pub term: Option<String>,
+    pub term_id: Option<String>,
+    pub term_ws: Option<String>,
 }
 
 /// The accumulator of the fold. `st`, `last_stop` and `decisions` are the model's `st`,
@@ -96,6 +107,11 @@ pub struct Session {
     pub report_title: Option<String>,
     pub questions: Vec<String>,
     pub report_goal: Option<String>,
+    pub recommends: Vec<String>,
+    /// From the latest start line; None when the terminal is not one we can drive.
+    pub term: Option<String>,
+    pub term_id: Option<String>,
+    pub term_ws: Option<String>,
     /// ts of the latest start line (startup, resume or clear). None if the log has none.
     pub started: Option<String>,
     /// From the latest start line: claude or codex. None on old lines.
@@ -128,6 +144,10 @@ pub fn step(acc: &Session, ev: &Event) -> Session {
             next.report_title = None;
             next.questions = Vec::new();
             next.report_goal = None;
+            next.recommends = Vec::new();
+            next.term = ev.term.clone();
+            next.term_id = ev.term_id.clone();
+            next.term_ws = ev.term_ws.clone();
             next.started = Some(ev.ts.clone());
             next.agent = ev.agent.clone();
             next.pid = ev.pid;
@@ -148,9 +168,11 @@ pub fn step(acc: &Session, ev: &Event) -> Session {
             next.report_title = ev.report_title.clone();
             next.questions = ev.questions.clone();
             next.report_goal = ev.report_goal.clone();
+            next.recommends = ev.recommends.clone();
         }
         Some(Kind::Resolved) if current_stop(acc, &ev.resolves) => next.st = St::Resolved,
         Some(Kind::Kill) if current_stop(acc, &ev.resolves) => next.st = St::Ended,
+        Some(Kind::Answer) if current_stop(acc, &ev.resolves) => next.st = St::Answered,
         Some(Kind::End) => next.st = St::Ended,
         // The turn ended without a Stop; the agent waits for the next prompt, like after start.
         Some(Kind::Interrupt) if matches!(acc.st, St::Working | St::Permission | St::Background) => next.st = St::Idle,

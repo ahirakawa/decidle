@@ -584,3 +584,168 @@ fn rows_carry_questions_goal_and_times() {
     assert_eq!(r["report_goal"], Value::Null);
     assert_eq!(r["started"], json!(ts[8]));
 }
+
+static CALLS: std::sync::Mutex<Vec<Vec<String>>> = std::sync::Mutex::new(Vec::new());
+
+fn record_call(argv: &[String]) -> Result<(), String> {
+    CALLS.lock().unwrap().push(argv.to_vec());
+    Ok(())
+}
+
+fn refuse_call(_: &[String]) -> Result<(), String> {
+    Err("cmux: アクセスが拒否されました".into())
+}
+
+/// Like `start`, with the terminal commands replaced.
+fn start_with(log: &PathBuf, runner: fn(&[String]) -> Result<(), String>) -> (u16, String) {
+    let mut server = Server::bind(0, log.clone()).unwrap();
+    server.set_runner(runner);
+    let port = server.port();
+    std::thread::spawn(move || server.run());
+    let (_, page) = request(port, "GET", "/", &[], "");
+    let marker = "name=\"decidle-token\" content=\"";
+    let at = page.find(marker).unwrap() + marker.len();
+    (port, page[at..at + 64].to_string())
+}
+
+fn count_of(log: &PathBuf, event: &str) -> usize {
+    fs::read_to_string(log).unwrap().lines().filter(|l| l.contains(&format!("\"event\":\"{event}\""))).count()
+}
+
+#[test]
+fn answer_types_the_recommended_options_once_and_only_into_a_stopped_session() {
+    let dir = temp_dir();
+    let mut claude = fake_claude(&dir);
+    let pid = claude.id() as i64;
+    let started = procinfo::info(pid).unwrap().started;
+    let log = dir.join("events.jsonl");
+    let base = SystemTime::now() - Duration::from_secs(60);
+    let idle = transcript(&dir, "idle.jsonl", &[("user", base), ("assistant", base)]);
+    let rec = |term: Value| {
+        let mut v = json!({"pid": pid, "pid_started": started, "transcript_path": idle});
+        v.as_object_mut().unwrap().extend(term.as_object().unwrap().clone());
+        v
+    };
+    let cmux = json!({"term": "cmux", "term_id": "SURF-1", "term_ws": "WS-1"});
+    let asked = |q: &str, r: &str| json!({"report_title": "題", "decisions": 1, "questions": [q], "recommends": [r]});
+    let ts = write_log(
+        &log,
+        &[
+            ("ok", "start", rec(cmux.clone())),
+            ("ok", "stop", asked("古い問い", "古い勧め")), // 1
+            ("ok", "prompt", json!({})),
+            ("ok", "stop", asked("保存先をどちらにするか?", "ローカル")), // 3
+            ("bg", "start", rec(cmux.clone())),
+            ("bg", "stop", {
+                let mut v = asked("問い", "勧め");
+                v["background"] = json!(true);
+                v
+            }), // 5
+            ("perm", "start", rec(cmux.clone())),
+            ("perm", "stop", asked("問い", "勧め")), // 7
+            ("perm", "prompt", json!({})),
+            ("perm", "permission", json!({})),
+            ("norec", "start", rec(cmux.clone())),
+            ("norec", "stop", asked("問い", "")), // 11
+            ("meta", "start", rec(cmux.clone())),
+            ("meta", "stop", asked("問い $(whoami)", "勧め")), // 13
+            ("noterm", "start", rec(json!({}))),
+            ("noterm", "stop", asked("問い", "勧め")), // 15
+            ("badid", "start", rec(json!({"term": "cmux", "term_id": "a b"}))),
+            ("badid", "stop", asked("問い", "勧め")), // 17
+        ],
+        base,
+    );
+    let (port, token) = start_with(&log, record_call);
+    let target = |sid: &str, k: usize| json!({"session_id": sid, "resolves": ts[k]});
+    let calls = || CALLS.lock().unwrap().clone();
+
+    // The page learns what would be typed, and which rows have a terminal.
+    let all = sessions(port);
+    let row = |sid: &str| all["sessions"].as_array().unwrap().iter().find(|r| r["session_id"] == sid).unwrap().clone();
+    assert_eq!(row("ok")["answer_text"], json!("保存先をどちらにするかは「ローカル」で進めて。"));
+    assert_eq!(row("ok")["term"], json!("cmux"));
+    assert_eq!(row("norec")["answer_text"], Value::Null);
+    assert_eq!(row("meta")["answer_text"], Value::Null);
+    assert_eq!(row("noterm")["term"], Value::Null);
+    assert_eq!(row("badid")["term"], Value::Null);
+
+    // Every refusal: nothing typed, nothing appended.
+    for (sid, k) in [("ok", 1), ("bg", 5), ("perm", 7), ("norec", 11), ("meta", 13), ("noterm", 15), ("badid", 17)] {
+        let (status, out) = post(port, "/api/answer", &token, &target(sid, k));
+        assert_eq!(status, 409, "{sid}: {out}");
+    }
+    assert_eq!(post(port, "/api/focus", &token, &target("noterm", 15)).0, 409);
+    assert!(calls().is_empty(), "{:?}", calls());
+    assert_eq!(count_of(&log, "answer"), 0);
+
+    // Focus brings the terminal to the front and records nothing.
+    let lines_before = fs::read_to_string(&log).unwrap().lines().count();
+    assert_eq!(post(port, "/api/focus", &token, &target("ok", 3)).0, 200);
+    let strs = |v: &[&str]| v.iter().map(|s| s.to_string()).collect::<Vec<String>>();
+    assert_eq!(
+        calls(),
+        vec![
+            strs(&["cmux", "select-workspace", "--workspace", "WS-1"]),
+            strs(&["cmux", "focus-panel", "--panel", "SURF-1", "--workspace", "WS-1"]),
+        ]
+    );
+    assert_eq!(fs::read_to_string(&log).unwrap().lines().count(), lines_before);
+    CALLS.lock().unwrap().clear();
+
+    // Accepted: the text built from the log and Enter, once, and an answer line.
+    let (status, out) = post(port, "/api/answer", &token, &target("ok", 3));
+    assert_eq!(status, 200, "{out}");
+    assert_eq!(
+        calls(),
+        vec![
+            strs(&["cmux", "send", "--workspace", "WS-1", "--surface", "SURF-1", "--", "保存先をどちらにするかは「ローカル」で進めて。"]),
+            strs(&["cmux", "send-key", "--workspace", "WS-1", "--surface", "SURF-1", "enter"]),
+        ]
+    );
+    assert_eq!(count_of(&log, "answer"), 1);
+    assert!(!rows(port).iter().any(|(sid, _)| sid == "ok"), "an answered row is hidden");
+
+    // A second press on the same stop types nothing.
+    assert_eq!(post(port, "/api/answer", &token, &target("ok", 3)).0, 409);
+    assert_eq!(calls().len(), 2);
+    assert_eq!(count_of(&log, "answer"), 1);
+
+    // The terminal takes the text as a prompt: the row comes back as working.
+    append_raw(&log, &format!("{}\n", json!({"ts": events::now_rfc3339(), "session_id": "ok", "cwd": "/work/ok", "event": "prompt"})));
+    assert!(rows(port).contains(&("ok".to_string(), "working".to_string())));
+
+    let _ = claude.kill();
+    let _ = claude.wait();
+}
+
+#[test]
+fn a_terminal_command_that_fails_is_reported_as_502() {
+    let dir = temp_dir();
+    let mut claude = fake_claude(&dir);
+    let pid = claude.id() as i64;
+    let started = procinfo::info(pid).unwrap().started;
+    let log = dir.join("events.jsonl");
+    let base = SystemTime::now() - Duration::from_secs(60);
+    let idle = transcript(&dir, "idle.jsonl", &[("user", base), ("assistant", base)]);
+    let ts = write_log(
+        &log,
+        &[
+            ("s", "start", json!({"pid": pid, "pid_started": started, "transcript_path": idle, "term": "cmux", "term_id": "SURF-1"})),
+            ("s", "stop", json!({"report_title": "題", "decisions": 1, "questions": ["問い"], "recommends": ["勧め"]})),
+        ],
+        base,
+    );
+    let (port, token) = start_with(&log, refuse_call);
+    let target = json!({"session_id": "s", "resolves": ts[1]});
+    let (status, out) = post(port, "/api/focus", &token, &target);
+    assert_eq!(status, 502, "{out}");
+    assert!(error_of(&out).contains("アクセスが拒否"), "{out}");
+    let (status, out) = post(port, "/api/answer", &token, &target);
+    assert_eq!(status, 502, "{out}");
+    // The answer line was written before the command ran, so a second press is refused.
+    assert_eq!(count_of(&log, "answer"), 1);
+    assert_eq!(post(port, "/api/answer", &token, &target).0, 409);
+    let _ = claude.kill();
+    let _ = claude.wait();
+}

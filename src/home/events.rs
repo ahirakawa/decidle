@@ -199,6 +199,9 @@ pub struct StopReport {
     /// The `question` of each decision in the report, as the agent wrote it (at most
     /// `question_max_chars` characters each). Never prompt or reply text.
     pub questions: Vec<String>,
+    /// The recommended option of each decision, in the order of `questions`; empty where the
+    /// report's `recommend` names no option.
+    pub recommends: Vec<String>,
     /// The report's `goal`, as the agent wrote it.
     pub goal: String,
 }
@@ -235,6 +238,7 @@ pub fn append_stop(
         m.insert("report_title".into(), json!(r.title));
         m.insert("decisions".into(), json!(r.decisions));
         m.insert("questions".into(), json!(r.questions));
+        m.insert("recommends".into(), json!(r.recommends));
         if !r.goal.is_empty() {
             m.insert("report_goal".into(), json!(r.goal));
         }
@@ -296,6 +300,13 @@ fn line_for(input: &HookInput) -> Option<Map<String, Value>> {
         m.insert("pid".into(), json!(found.map(|(pid, _)| pid)));
         m.insert("pid_started".into(), json!(found.map(|(_, started)| started)));
         m.insert("transcript_path".into(), json!(input.transcript_path));
+        if let Some(t) = super::term::from_env(|k| std::env::var(k).ok()) {
+            m.insert("term".into(), json!(t.kind));
+            m.insert("term_id".into(), json!(t.id));
+            if let Some(ws) = t.workspace {
+                m.insert("term_ws".into(), json!(ws));
+            }
+        }
     }
     Some(m)
 }

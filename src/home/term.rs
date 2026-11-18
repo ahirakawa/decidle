@@ -1,0 +1,130 @@
+//! The terminals the Home page can drive: bringing an agent's terminal to the front, and typing
+//! the report's recommended options into it. See "端末へ行く、勧めで答える" in docs/spec-home.md.
+
+use std::io;
+use std::process::{Command, Stdio};
+
+use super::state::Session;
+
+/// What the SessionStart hook records about the terminal.
+#[derive(Debug, PartialEq, Eq)]
+pub struct Recorded {
+    pub kind: &'static str,
+    pub id: String,
+    pub workspace: Option<String>,
+}
+
+/// An id is passed to a command as one argument; anything unusual is treated as absent.
+pub fn valid_id(id: &str) -> bool {
+    !id.is_empty() && id.len() <= 80 && !id.starts_with('-') && id.chars().all(|c| c.is_ascii_alphanumeric() || matches!(c, '-' | ':'))
+}
+
+/// Reads the terminal from the hook's environment. herdr wins over cmux, since herdr may run
+/// inside a cmux terminal and then the pane is the one to address.
+pub fn from_env(var: impl Fn(&str) -> Option<String>) -> Option<Recorded> {
+    let get = |k: &str| var(k).filter(|v| valid_id(v));
+    if let Some(id) = get("HERDR_PANE_ID") {
+        return Some(Recorded { kind: "herdr", id, workspace: None });
+    }
+    let id = get("CMUX_SURFACE_ID")?;
+    Some(Recorded { kind: "cmux", id, workspace: get("CMUX_WORKSPACE_ID") })
+}
+
+/// What a start line may carry: a known kind with a valid id, or nothing at all.
+pub fn checked(
+    term: Option<String>,
+    id: Option<String>,
+    ws: Option<String>,
+) -> (Option<String>, Option<String>, Option<String>) {
+    match (term.as_deref(), id) {
+        (Some("cmux" | "herdr"), Some(id)) if valid_id(&id) => (term, Some(id), ws.filter(|w| valid_id(w))),
+        _ => (None, None, None),
+    }
+}
+
+/// Characters that a shell or the terminal's own escapes would act on. The text is typed into
+/// the agent's prompt, but if the agent died in the last moment a shell reads it instead.
+fn plain(text: &str) -> bool {
+    !text.is_empty() && !text.chars().any(|c| c.is_control() || matches!(c, '`' | '$' | ';' | '|' | '&' | '<' | '>' | '\\' | '!' | '\'' | '"'))
+}
+
+/// The one line the answer button types: built from the stop line only, never from the request.
+/// None when a decision has no recommended option, or the text is not plain.
+pub fn answer_text(s: &Session) -> Option<String> {
+    if s.questions.is_empty() || s.questions.len() != s.recommends.len() {
+        return None;
+    }
+    let parts: Vec<String> = s
+        .questions
+        .iter()
+        .zip(&s.recommends)
+        .map(|(q, r)| format!("{}は「{}」で進めて。", q.trim_end_matches(['?', '？', '。']), r))
+        .collect();
+    let ok = s.questions.iter().chain(&s.recommends).all(|t| plain(t));
+    ok.then(|| parts.join(" "))
+}
+
+fn arg(flag: &str, value: &str) -> [String; 2] {
+    [flag.to_string(), value.to_string()]
+}
+
+/// The commands that bring the terminal to the front.
+pub fn focus_commands(s: &Session) -> Option<Vec<Vec<String>>> {
+    let id = s.term_id.as_deref()?;
+    match s.term.as_deref()? {
+        "cmux" => {
+            let mut out = Vec::new();
+            let mut focus = vec!["cmux".to_string(), "focus-panel".to_string()];
+            focus.extend(arg("--panel", id));
+            if let Some(ws) = s.term_ws.as_deref() {
+                let mut select = vec!["cmux".to_string(), "select-workspace".to_string()];
+                select.extend(arg("--workspace", ws));
+                out.push(select);
+                focus.extend(arg("--workspace", ws));
+            }
+            out.push(focus);
+            Some(out)
+        }
+        "herdr" => Some(vec![vec!["herdr".into(), "agent".into(), "focus".into(), id.into()]]),
+        _ => None,
+    }
+}
+
+/// The commands that type `text` and Enter into the terminal. cmux refuses by itself when the
+/// agent's prompt holds a draft or a dialog is open; we never pass --force.
+pub fn answer_commands(s: &Session, text: &str) -> Option<Vec<Vec<String>>> {
+    let id = s.term_id.as_deref()?;
+    match s.term.as_deref()? {
+        "cmux" => {
+            let mut send = vec!["cmux".to_string(), "send".to_string()];
+            let mut key = vec!["cmux".to_string(), "send-key".to_string()];
+            if let Some(ws) = s.term_ws.as_deref() {
+                send.extend(arg("--workspace", ws));
+                key.extend(arg("--workspace", ws));
+            }
+            send.extend(arg("--surface", id));
+            key.extend(arg("--surface", id));
+            send.extend(["--".to_string(), text.to_string()]);
+            key.push("enter".to_string());
+            Some(vec![send, key])
+        }
+        "herdr" => Some(vec![vec!["herdr".into(), "agent".into(), "prompt".into(), id.into(), text.into()]]),
+        _ => None,
+    }
+}
+
+/// Runs one command without a shell. Err carries what to tell the human.
+pub fn run(argv: &[String]) -> Result<(), String> {
+    let (program, args) = argv.split_first().ok_or("空の命令")?;
+    let out = Command::new(program)
+        .args(args)
+        .env("CMUX_QUIET", "1")
+        .stdin(Stdio::null())
+        .output()
+        .map_err(|e: io::Error| format!("{program} を起動できない: {e}"))?;
+    if out.status.success() {
+        return Ok(());
+    }
+    let msg = String::from_utf8_lossy(if out.stderr.is_empty() { &out.stdout } else { &out.stderr });
+    Err(format!("{program}: {}", msg.trim().chars().take(200).collect::<String>()))
+}

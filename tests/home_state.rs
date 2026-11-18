@@ -47,6 +47,13 @@ fn model_step(acc: Acc, ev: Ev, i: usize) -> Acc {
                 acc
             }
         }
+        "answer" => {
+            if acc.st == "stopped" && ev.res == acc.last_stop {
+                Acc { st: "answered", ..acc }
+            } else {
+                acc
+            }
+        }
         "end" => Acc { st: "ended", ..acc },
         "interrupt" => {
             if matches!(acc.st, "working" | "permission" | "background") {
@@ -88,6 +95,7 @@ fn st_name(st: St) -> &'static str {
         St::Stopped => "stopped",
         St::Background => "background",
         St::Resolved => "resolved",
+        St::Answered => "answered",
         St::Ended => "ended",
     }
 }
@@ -107,7 +115,7 @@ impl Rng {
     }
 }
 
-const KINDS: [&str; 8] = ["start", "prompt", "permission", "stop", "resolved", "kill", "end", "interrupt"];
+const KINDS: [&str; 9] = ["start", "prompt", "permission", "stop", "resolved", "kill", "end", "interrupt", "answer"];
 const SESSIONS: usize = 3;
 
 fn ts_of(i: usize) -> String {
@@ -122,7 +130,7 @@ fn random_log(rng: &mut Rng, len: usize) -> Vec<Ev> {
         let s = rng.below(SESSIONS);
         let e = KINDS[rng.below(KINDS.len())];
         let d = rng.below(3) as i64;
-        let res = if matches!(e, "resolved" | "kill") {
+        let res = if matches!(e, "resolved" | "kill" | "answer") {
             let stops: Vec<usize> =
                 log.iter().enumerate().filter(|(_, ev)| ev.e == "stop").map(|(k, _)| k + 1).collect();
             match rng.below(4) {
