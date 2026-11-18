@@ -104,6 +104,14 @@ pub fn report_link(html_path: &str) -> Option<String> {
     Some(link)
 }
 
+/// Percent-encodes everything but unreserved characters, as `encodeURIComponent` does for the
+/// characters of a timestamp.
+fn percent_encode(text: &str) -> String {
+    text.bytes()
+        .map(|b| if b.is_ascii_alphanumeric() || matches!(b, b'-' | b'.' | b'_' | b'~') { (b as char).to_string() } else { format!("%{b:02X}") })
+        .collect()
+}
+
 fn read_page(path: &str) -> io::Result<String> {
     use std::os::unix::fs::OpenOptionsExt;
     let file = std::fs::OpenOptions::new()
@@ -347,6 +355,11 @@ impl Server {
             Ok(s) => s,
             Err(r) => return r,
         };
+        // The page says which stop it shows; a newer stop has another report.
+        let stop = raw_target.split_once('?').and_then(|(_, q)| q.split('&').find_map(|kv| kv.strip_prefix("stop=")));
+        if stop.is_some_and(|s| session.last_stop.as_deref().map(percent_encode).as_deref() != Some(s)) {
+            return error(409, "見ている停止のあとに新しい停止がある");
+        }
         let report = session
             .report_path
             .as_deref()

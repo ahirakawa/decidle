@@ -263,7 +263,7 @@ function item(s, i) {
 }
 // The report of the selected row, read from the server by session id and drawn here, so that
 // it takes the colors of the page. Everything in it is text the agent wrote: only textContent.
-let rep = { key: null, body: null };
+let rep = { key: null, body: null }, asking = null;
 const arr = x => Array.isArray(x) ? x : [];
 const str = x => typeof x === "string" ? x : "";
 function drawSide(s) {
@@ -287,18 +287,22 @@ function drawSide(s) {
 }
 async function loadSide(s) {
   const key = s && s.report_title ? s.session_id + "|" + s.last_stop : null;
-  if (key === rep.key) return;
+  if (key === rep.key || key === asking) return;
+  asking = key;
   rep = { key: null, body: null };
   drawSide(s);
   if (!key) return;
   let body = null;
   try {
-    const res = await fetch("/api/report?session_id=" + encodeURIComponent(s.session_id), { cache: "no-store" });
+    const res = await fetch("/api/report?session_id=" + encodeURIComponent(s.session_id) + "&stop=" + encodeURIComponent(s.last_stop || ""), { cache: "no-store" });
     const out = await res.json();
     if (res.ok) body = out.report;
   } catch (_) {}
+  // Another row may have been selected, or a newer stop recorded, while this was on its way.
+  const now = data.sessions.find(x => x.session_id === sel);
+  if (!now || !now.report_title || now.session_id + "|" + now.last_stop !== key) return;
   rep = { key, body };
-  drawSide(data.sessions.find(x => x.session_id === sel));
+  drawSide(now);
 }
 function rows() {
   const all = data.sessions.filter(s => s.state !== "working" && s.state !== "background");

@@ -626,7 +626,7 @@ fn answer_types_the_recommended_options_once_and_only_into_a_stopped_session() {
         v.as_object_mut().unwrap().extend(term.as_object().unwrap().clone());
         v
     };
-    let cmux = json!({"term": "cmux", "term_id": "SURF-1", "term_ws": "WS-1"});
+    let cmux = json!({"term": "cmux", "term_id": "11111111-2222-3333-4444-555555555555", "term_ws": "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee"});
     let asked = |q: &str, r: &str| json!({"report_title": "題", "decisions": 1, "questions": [q], "recommends": [r]});
     let ts = write_log(
         &log,
@@ -663,7 +663,7 @@ fn answer_types_the_recommended_options_once_and_only_into_a_stopped_session() {
     // The page learns what would be typed, and which rows have a terminal.
     let all = sessions(port);
     let row = |sid: &str| all["sessions"].as_array().unwrap().iter().find(|r| r["session_id"] == sid).unwrap().clone();
-    assert_eq!(row("ok")["answer_text"], json!("保存先をどちらにするかは「ローカル」で進めて。"));
+    assert_eq!(row("ok")["answer_text"], json!("回答: 保存先をどちらにするかは「ローカル」で進めて。"));
     assert_eq!(row("ok")["term"], json!("cmux"));
     assert_eq!(row("norec")["answer_text"], Value::Null);
     assert_eq!(row("meta")["answer_text"], Value::Null);
@@ -686,8 +686,8 @@ fn answer_types_the_recommended_options_once_and_only_into_a_stopped_session() {
     assert_eq!(
         calls(),
         vec![
-            strs(&["cmux", "select-workspace", "--workspace", "WS-1"]),
-            strs(&["cmux", "focus-panel", "--panel", "SURF-1", "--workspace", "WS-1"]),
+            strs(&["cmux", "select-workspace", "--workspace", "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee"]),
+            strs(&["cmux", "focus-panel", "--panel", "11111111-2222-3333-4444-555555555555", "--workspace", "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee"]),
         ]
     );
     assert_eq!(fs::read_to_string(&log).unwrap().lines().count(), lines_before);
@@ -699,8 +699,8 @@ fn answer_types_the_recommended_options_once_and_only_into_a_stopped_session() {
     assert_eq!(
         calls(),
         vec![
-            strs(&["cmux", "send", "--workspace", "WS-1", "--surface", "SURF-1", "--", "保存先をどちらにするかは「ローカル」で進めて。"]),
-            strs(&["cmux", "send-key", "--workspace", "WS-1", "--surface", "SURF-1", "enter"]),
+            strs(&["cmux", "send", "--workspace", "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee", "--surface", "11111111-2222-3333-4444-555555555555", "--", "回答: 保存先をどちらにするかは「ローカル」で進めて。"]),
+            strs(&["cmux", "send-key", "--workspace", "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee", "--surface", "11111111-2222-3333-4444-555555555555", "enter"]),
         ]
     );
     assert_eq!(count_of(&log, "answer"), 1);
@@ -731,7 +731,7 @@ fn a_terminal_command_that_fails_is_reported_as_502() {
     let ts = write_log(
         &log,
         &[
-            ("s", "start", json!({"pid": pid, "pid_started": started, "transcript_path": idle, "term": "cmux", "term_id": "SURF-1"})),
+            ("s", "start", json!({"pid": pid, "pid_started": started, "transcript_path": idle, "term": "cmux", "term_id": "11111111-2222-3333-4444-555555555555", "term_ws": "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee"})),
             ("s", "stop", json!({"report_title": "題", "decisions": 1, "questions": ["問い"], "recommends": ["勧め"]})),
         ],
         base,
@@ -793,7 +793,7 @@ fn herdr_pane_is_checked_to_still_hold_the_session_before_anything_is_typed() {
     assert_eq!(status, 200, "{out}");
     assert_eq!(
         *HERDR_CALLS.lock().unwrap(),
-        vec![strs(&["herdr", "agent", "get", "w1:p2"]), strs(&["herdr", "agent", "prompt", "w1:p2", "問いは「推奨」で進めて。"])]
+        vec![strs(&["herdr", "agent", "get", "w1:p2"]), strs(&["herdr", "agent", "prompt", "w1:p2", "回答: 問いは「推奨」で進めて。"])]
     );
     assert_eq!(count_of(&log, "answer"), 1);
     let _ = claude.kill();
@@ -819,7 +819,7 @@ fn focus_raises_the_terminal_app_and_answer_does_not() {
     let ts = write_log(
         &log,
         &[
-            ("s", "start", json!({"pid": pid, "pid_started": started, "transcript_path": idle, "term": "cmux", "term_id": "SURF-1"})),
+            ("s", "start", json!({"pid": pid, "pid_started": started, "transcript_path": idle, "term": "cmux", "term_id": "11111111-2222-3333-4444-555555555555", "term_ws": "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee"})),
             ("s", "stop", json!({"report_title": "題", "decisions": 1, "questions": ["問い"], "recommends": ["推奨"]})),
         ],
         base,
@@ -880,6 +880,8 @@ fn report_json_is_served_by_session_only_for_the_recorded_file() {
     for sid in ["none", "broken", "linked", "gone", "unknown"] {
         assert_eq!(get(&format!("?session_id={sid}")).0, 404, "{sid}");
     }
+    // The page names the stop it shows; for an older stop the report is not returned.
+    assert_eq!(get("?session_id=with&stop=2020-01-01T00%3A00%3A00.000000Z").0, 409);
     // The request cannot name a path.
     assert_eq!(get("").0, 400);
     assert_eq!(get(&format!("?session_id={}", p(&report))).0, 400);

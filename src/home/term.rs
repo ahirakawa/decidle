@@ -19,6 +19,10 @@ pub fn valid_id(id: &str) -> bool {
     !id.is_empty() && id.len() <= 80 && !id.starts_with('-') && id.chars().all(|c| c.is_ascii_alphanumeric() || matches!(c, '-' | ':'))
 }
 
+fn is_uuid(id: &str) -> bool {
+    id.len() == 36 && id.chars().enumerate().all(|(i, c)| if matches!(i, 8 | 13 | 18 | 23) { c == '-' } else { c.is_ascii_hexdigit() })
+}
+
 /// Reads the terminal from the hook's environment. herdr wins over cmux, since herdr may run
 /// inside a cmux terminal and then the pane is the one to address.
 pub fn from_env(var: impl Fn(&str) -> Option<String>) -> Option<Recorded> {
@@ -37,10 +41,17 @@ pub fn checked(
     ws: Option<String>,
 ) -> (Option<String>, Option<String>, Option<String>) {
     match (term.as_deref(), id) {
-        (Some("cmux" | "herdr"), Some(id)) if valid_id(&id) => (term, Some(id), ws.filter(|w| valid_id(w))),
+        (Some("herdr"), Some(id)) if valid_id(&id) => (term, Some(id), None),
+        // cmux also takes an index or a short ref where it takes an id, and those can come to
+        // name another terminal. Only the UUIDs it puts in the environment are accepted, and
+        // the workspace must come with the surface.
+        (Some("cmux"), Some(id)) if is_uuid(&id) && ws.as_deref().is_some_and(is_uuid) => (term, Some(id), ws),
         _ => (None, None, None),
     }
 }
+
+/// The first word of every answer line.
+pub const ANSWER_PREFIX: &str = "回答:";
 
 /// Characters that a shell or the terminal's own escapes would act on. The text is typed into
 /// the agent's prompt, but if the agent died in the last moment a shell reads it instead.
@@ -61,7 +72,10 @@ pub fn answer_text(s: &Session) -> Option<String> {
         .map(|(q, r)| format!("{}は「{}」で進めて。", q.trim_end_matches(['?', '？', '。']), r))
         .collect();
     let ok = s.questions.iter().chain(&s.recommends).all(|t| plain(t));
-    ok.then(|| parts.join(" "))
+    // The line starts with a fixed word. If the agent died in the last moment and a shell reads
+    // the line, the shell looks for a command of this name and finds none; without it, the
+    // first word of the agent's question would be run as a command.
+    ok.then(|| format!("{ANSWER_PREFIX} {}", parts.join(" ")))
 }
 
 fn arg(flag: &str, value: &str) -> [String; 2] {
@@ -145,15 +159,31 @@ pub fn occupant_is(output: &str, session_id: &str) -> bool {
         .unwrap_or(false)
 }
 
+const RUN_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(2);
+
 /// Runs one command without a shell and returns its stdout. Err carries what to tell the human.
 pub fn run(argv: &[String]) -> Result<String, String> {
     let (program, args) = argv.split_first().ok_or("空の命令")?;
-    let out = Command::new(program)
+    let mut child = Command::new(program)
         .args(args)
         .env("CMUX_QUIET", "1")
         .stdin(Stdio::null())
-        .output()
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
         .map_err(|e: io::Error| format!("{program} を起動できない: {e}"))?;
+    // Hooks give up on the append lock after a few seconds, so a command that hangs must not
+    // keep the server (and the lock) for longer than that.
+    let deadline = std::time::Instant::now() + RUN_TIMEOUT;
+    while child.try_wait().map_err(|e| e.to_string())?.is_none() {
+        if std::time::Instant::now() >= deadline {
+            let _ = child.kill();
+            let _ = child.wait();
+            return Err(format!("{program}: {} 秒待っても終わらないので止めた", RUN_TIMEOUT.as_secs()));
+        }
+        std::thread::sleep(std::time::Duration::from_millis(20));
+    }
+    let out = child.wait_with_output().map_err(|e| e.to_string())?;
     let stdout = String::from_utf8_lossy(&out.stdout).into_owned();
     if !out.status.success() {
         let msg = if out.stderr.is_empty() { stdout } else { String::from_utf8_lossy(&out.stderr).into_owned() };

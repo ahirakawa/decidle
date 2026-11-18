@@ -28,11 +28,17 @@ fn start_records_cmux_or_herdr_from_the_environment() {
 #[test]
 fn a_start_line_with_an_unusable_terminal_reads_as_none() {
     let s = |v: &str| Some(v.to_string());
-    assert_eq!(term::checked(s("cmux"), s("AB-1"), s("WS-1")), (s("cmux"), s("AB-1"), s("WS-1")));
-    assert_eq!(term::checked(s("cmux"), s("AB-1"), s("bad ws")), (s("cmux"), s("AB-1"), None));
-    assert_eq!(term::checked(s("cmux"), s("a;b"), None), (None, None, None));
-    assert_eq!(term::checked(s("cmux"), s("--force"), None), (None, None, None));
-    assert_eq!(term::checked(s("iterm"), s("AB-1"), None), (None, None, None));
+    let (id, ws) = ("11111111-2222-3333-4444-555555555555", "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee");
+    assert_eq!(term::checked(s("cmux"), s(id), s(ws)), (s("cmux"), s(id), s(ws)));
+    assert_eq!(term::checked(s("herdr"), s("w1:p2"), None), (s("herdr"), s("w1:p2"), None));
+    // cmux would read these as an index or a ref, which can come to name another terminal.
+    for bad in ["1", "surface:2", "AB-1", "--force", "a;b"] {
+        assert_eq!(term::checked(s("cmux"), s(bad), s(ws)), (None, None, None), "{bad}");
+    }
+    // Without its workspace cmux would fall back to the server's own.
+    assert_eq!(term::checked(s("cmux"), s(id), None), (None, None, None));
+    assert_eq!(term::checked(s("cmux"), s(id), s("2")), (None, None, None));
+    assert_eq!(term::checked(s("iterm"), s(id), s(ws)), (None, None, None));
     assert_eq!(term::checked(s("cmux"), None, None), (None, None, None));
 }
 
@@ -50,7 +56,7 @@ fn stopped(questions: &[&str], recommends: &[&str]) -> Session {
 fn the_answer_is_built_from_questions_and_recommended_options_only() {
     assert_eq!(
         term::answer_text(&stopped(&["保存先をどちらにするか?", "ポートを変えるか"], &["ローカル", "7878 のまま"])).as_deref(),
-        Some("保存先をどちらにするかは「ローカル」で進めて。 ポートを変えるかは「7878 のまま」で進めて。")
+        Some("回答: 保存先をどちらにするかは「ローカル」で進めて。 ポートを変えるかは「7878 のまま」で進めて。")
     );
     assert_eq!(term::answer_text(&stopped(&[], &[])), None);
     assert_eq!(term::answer_text(&stopped(&["問い"], &[""])), None);
@@ -68,4 +74,10 @@ fn the_host_app_is_a_plain_bundle_id_or_nothing() {
     assert_eq!(term::host_app(env(&[("__CFBundleIdentifier", "-a Calculator")])), None);
     assert_eq!(term::host_app(env(&[("__CFBundleIdentifier", "a/b")])), None);
     assert_eq!(term::raise_command("com.x.y"), vec!["open", "-b", "com.x.y"]);
+}
+
+#[test]
+fn the_answer_never_starts_with_a_word_the_agent_wrote() {
+    let text = term::answer_text(&stopped(&["git push するか"], &["する"])).unwrap();
+    assert!(text.starts_with("回答: "), "{text}");
 }
