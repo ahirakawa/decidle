@@ -17,7 +17,8 @@ fn temp_dir() -> PathBuf {
     let dir = std::env::temp_dir().join(format!("decidle-home-api-{}-{n}", std::process::id()));
     let _ = fs::remove_dir_all(&dir);
     fs::create_dir_all(&dir).unwrap();
-    dir
+    // The recorded report paths are real paths (macOS puts the temp folder behind /var -> /private/var).
+    fs::canonicalize(dir).unwrap()
 }
 
 fn ts_ago(secs: u64) -> String {
@@ -693,14 +694,13 @@ fn answer_types_the_recommended_options_once_and_only_into_a_stopped_session() {
     assert_eq!(fs::read_to_string(&log).unwrap().lines().count(), lines_before);
     CALLS.lock().unwrap().clear();
 
-    // Accepted: the text built from the log and Enter, once, and an answer line.
+    // Accepted: the text built from the log and Enter, in one command, once, and an answer line.
     let (status, out) = post(port, "/api/answer", &token, &target("ok", 3));
     assert_eq!(status, 200, "{out}");
     assert_eq!(
         calls(),
         vec![
-            strs(&["cmux", "send", "--workspace", "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee", "--surface", "11111111-2222-3333-4444-555555555555", "--", "回答: 保存先をどちらにするかは「ローカル」で進めて。"]),
-            strs(&["cmux", "send-key", "--workspace", "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee", "--surface", "11111111-2222-3333-4444-555555555555", "enter"]),
+            strs(&["cmux", "send", "--workspace", "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee", "--surface", "11111111-2222-3333-4444-555555555555", "--", "回答: 保存先をどちらにするかは「ローカル」で進めて。\\n"]),
         ]
     );
     assert_eq!(count_of(&log, "answer"), 1);
@@ -708,7 +708,7 @@ fn answer_types_the_recommended_options_once_and_only_into_a_stopped_session() {
 
     // A second press on the same stop types nothing.
     assert_eq!(post(port, "/api/answer", &token, &target("ok", 3)).0, 409);
-    assert_eq!(calls().len(), 2);
+    assert_eq!(calls().len(), 1);
     assert_eq!(count_of(&log, "answer"), 1);
 
     // The terminal takes the text as a prompt: the row comes back as working.
@@ -839,7 +839,7 @@ fn focus_raises_the_terminal_app_and_answer_does_not() {
     assert_eq!(post(port, "/api/focus", &token, &target).0, 200);
     assert_eq!(last(), vec!["open", "-b", "com.example.term"]);
     assert_eq!(post(port, "/api/answer", &token, &target).0, 200);
-    assert_eq!(last()[..2], ["cmux".to_string(), "send-key".to_string()]);
+    assert_eq!(last()[..2], ["cmux".to_string(), "send".to_string()]);
     assert!(!RAISE_CALLS.lock().unwrap().iter().skip(3).any(|c| c[0] == "open"));
     let _ = claude.kill();
     let _ = claude.wait();
@@ -855,6 +855,13 @@ fn report_json_is_served_by_session_only_for_the_recorded_file() {
     fs::write(&not_json, "not json").unwrap();
     let link = dir.join("link.report.json");
     std::os::unix::fs::symlink(&report, &link).unwrap();
+    // A folder on the way that is a link to the real folder.
+    let real_folder = dir.join("real");
+    fs::create_dir(&real_folder).unwrap();
+    fs::write(real_folder.join("task.report.json"), json!({"title": "題", "decisions": []}).to_string()).unwrap();
+    let folder_link = dir.join("via");
+    std::os::unix::fs::symlink(&real_folder, &folder_link).unwrap();
+    let via = folder_link.join("task.report.json");
     let p = |x: &PathBuf| x.to_string_lossy().into_owned();
     write_log(
         &log,
@@ -867,6 +874,8 @@ fn report_json_is_served_by_session_only_for_the_recorded_file() {
             ("broken", "stop", json!({"report_title": "題", "report_path": p(&not_json)})),
             ("linked", "start", json!({})),
             ("linked", "stop", json!({"report_title": "題", "report_path": p(&link)})),
+            ("via", "start", json!({})),
+            ("via", "stop", json!({"report_title": "題", "report_path": p(&via)})),
             ("gone", "start", json!({})),
             ("gone", "stop", json!({"report_title": "題", "report_path": p(&dir.join("missing.json"))})),
         ],
@@ -877,7 +886,7 @@ fn report_json_is_served_by_session_only_for_the_recorded_file() {
     let (status, body) = get("?session_id=with");
     assert_eq!(status, 200, "{body}");
     assert_eq!(serde_json::from_str::<Value>(&body).unwrap()["report"]["conclusion"], "結論");
-    for sid in ["none", "broken", "linked", "gone", "unknown"] {
+    for sid in ["none", "broken", "linked", "via", "gone", "unknown"] {
         assert_eq!(get(&format!("?session_id={sid}")).0, 404, "{sid}");
     }
     // The page names the stop it shows; for an older stop the report is not returned.

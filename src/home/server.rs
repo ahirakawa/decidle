@@ -121,6 +121,12 @@ fn read_page(path: &str) -> io::Result<String> {
         .read(true)
         .custom_flags(libc::O_NOFOLLOW | libc::O_NONBLOCK)
         .open(path)?;
+    // O_NOFOLLOW covers only the last part. The recorded path is the real one (gate.rs resolves
+    // links before recording), so a folder on the way that has become a link is refused here.
+    let parent = Path::new(path).parent().ok_or_else(|| io::Error::new(io::ErrorKind::InvalidData, "no folder"))?;
+    if std::fs::canonicalize(parent)? != parent {
+        return Err(io::Error::new(io::ErrorKind::InvalidData, "a folder on the path is a link"));
+    }
     let meta = file.metadata()?;
     if !meta.is_file() || meta.len() > MAX_REPORT_PAGE_BYTES {
         return Err(io::Error::new(io::ErrorKind::InvalidData, "not a report page"));
@@ -504,7 +510,7 @@ impl Server {
         self.run_all(&commands)
     }
 
-    /// Where pane ids are reused (herdr), asks the terminal which session the pane holds now.
+    /// Where a pane can come to hold another agent (herdr), asks the terminal which session the pane holds now.
     fn check_occupant(&self, session: &Session) -> Result<(), Response> {
         let Some(argv) = term::occupant_command(session) else {
             return Ok(());

@@ -111,16 +111,15 @@ pub fn answer_commands(s: &Session, text: &str) -> Option<Vec<Vec<String>>> {
     match s.term.as_deref()? {
         "cmux" => {
             let mut send = vec!["cmux".to_string(), "send".to_string()];
-            let mut key = vec!["cmux".to_string(), "send-key".to_string()];
             if let Some(ws) = s.term_ws.as_deref() {
                 send.extend(arg("--workspace", ws));
-                key.extend(arg("--workspace", ws));
             }
             send.extend(arg("--surface", id));
-            key.extend(arg("--surface", id));
-            send.extend(["--".to_string(), text.to_string()]);
-            key.push("enter".to_string());
-            Some(vec![send, key])
+            // The text and Enter go in one command: cmux types `\n` as Enter. With a separate
+            // send-key, a failure there would leave the text in the prompt with no Enter. The
+            // text itself holds no backslash (see `plain`), so no other escape can appear.
+            send.extend(["--".to_string(), format!("{text}\\n")]);
+            Some(vec![send])
         }
         "herdr" => Some(vec![vec!["herdr".into(), "agent".into(), "prompt".into(), id.into(), text.into()]]),
         _ => None,
@@ -141,9 +140,10 @@ pub fn raise_command(bundle_id: &str) -> Vec<String> {
     vec!["open".into(), "-b".into(), bundle_id.into()]
 }
 
-/// herdr numbers panes by position, so a recorded pane id can come to name another pane.
-/// The command whose output says which agent session the pane holds now; None for terminals
-/// whose ids are not reused.
+/// A herdr pane keeps its id when the agent in it ends and another one starts, so the pane
+/// can come to hold another session. The command whose output says which agent session the
+/// pane holds now; None for other terminals. The check and the send are two commands, so a
+/// swap in between is not caught (see docs/spec-home.md).
 pub fn occupant_command(s: &Session) -> Option<Vec<String>> {
     match (s.term.as_deref()?, s.term_id.as_deref()?) {
         ("herdr", id) => Some(vec!["herdr".into(), "agent".into(), "get".into(), id.into()]),

@@ -103,12 +103,15 @@ pub fn write_atomic(path: &Path, bytes: &[u8], private_parent: bool) -> io::Resu
     })
 }
 
-/// Removes control and bidirectional-override characters and shortens text taken from a report,
+/// Turns control characters into spaces, removes bidirectional overrides, and shortens text taken from a report,
 /// so that it cannot forge lines or hide content when shown in a terminal.
 pub fn clip(text: &str, max_chars: usize) -> String {
+    // A line break becomes a space rather than vanishing, so that the words on either side
+    // stay apart. Bidi overrides are dropped.
     let clean: String = text
         .chars()
-        .filter(|c| !c.is_control() && !matches!(*c, '\u{202A}'..='\u{202E}' | '\u{2066}'..='\u{2069}'))
+        .filter(|c| !matches!(*c, '\u{202A}'..='\u{202E}' | '\u{2066}'..='\u{2069}'))
+        .map(|c| if c.is_control() { ' ' } else { c })
         .collect();
     if clean.chars().count() <= max_chars {
         clean
@@ -140,4 +143,15 @@ pub fn now_iso() -> String {
         rem % 3600 / 60,
         rem % 60
     )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::clip;
+
+    #[test]
+    fn clip_turns_line_breaks_into_spaces() {
+        assert_eq!(clip("保存先を\nどちらにするか", 50), "保存先を どちらにするか");
+        assert_eq!(clip("a\u{1b}b\u{202E}c", 50), "a bc");
+    }
 }
