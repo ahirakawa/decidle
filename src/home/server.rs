@@ -27,6 +27,9 @@ pub struct Server {
     listener: TcpListener,
     port: u16,
     token: String,
+    /// Changes with every start of the server. A page loaded from an earlier start holds a
+    /// token this server does not accept; it sees the new value and reloads itself.
+    boot: String,
     events: PathBuf,
     /// Runs one terminal command. Tests replace it.
     runner: fn(&[String]) -> Result<String, String>,
@@ -233,7 +236,7 @@ impl Server {
     pub fn bind(port: u16, events: PathBuf) -> io::Result<Server> {
         let listener = TcpListener::bind((Ipv4Addr::LOCALHOST, port))?;
         let port = listener.local_addr()?.port();
-        Ok(Server { listener, port, token: random_token()?, events, runner: term::run, host_app: None })
+        Ok(Server { listener, port, token: random_token()?, boot: random_token()?[..16].to_string(), events, runner: term::run, host_app: None })
     }
 
     pub fn set_host_app(&mut self, app: Option<String>) {
@@ -295,7 +298,7 @@ impl Server {
                 status: 200,
                 content_type: "text/html; charset=utf-8",
                 csp: HOME_CSP,
-                body: PAGE.replace("__TOKEN__", &self.token),
+                body: PAGE.replace("__TOKEN__", &self.token).replace("__BOOT__", &self.boot),
             },
             ("GET", path) if path.starts_with("/report/") => self.report_page(&req.target),
             ("GET", "/api/sessions") => self.sessions(),
@@ -319,7 +322,7 @@ impl Server {
         match read::load(&self.events) {
             Ok(loaded) => {
                 let rows: Vec<Value> = state::visible(state::derive(&loaded.events), now_us()).iter().map(row).collect();
-                json_response(200, json!({ "ok": true, "sessions": rows, "skipped": loaded.skipped }))
+                json_response(200, json!({ "ok": true, "sessions": rows, "skipped": loaded.skipped, "boot": self.boot }))
             }
             Err(e) => error(500, &e),
         }

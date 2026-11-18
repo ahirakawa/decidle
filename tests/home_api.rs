@@ -888,3 +888,21 @@ fn report_json_is_served_by_session_only_for_the_recorded_file() {
     assert_eq!(get("?session_id=..%2Fwith").0, 400);
     assert_eq!(get(&format!("?path={}", p(&report))).0, 400);
 }
+
+#[test]
+fn the_page_can_tell_that_the_server_was_started_again() {
+    let dir = temp_dir();
+    let log = dir.join("events.jsonl");
+    write_log(&log, &[("a", "start", json!({}))], SystemTime::now());
+    let boot_of = |port: u16| {
+        let (_, page) = request(port, "GET", "/", &[], "");
+        let marker = "name=\"decidle-boot\" content=\"";
+        let at = page.find(marker).unwrap() + marker.len();
+        page[at..at + 16].to_string()
+    };
+    let (first, _) = start(&log);
+    let (second, _) = start(&log);
+    // The page and /api/sessions of one server agree; another start has another value.
+    assert_eq!(sessions(first)["boot"], json!(boot_of(first)));
+    assert_ne!(boot_of(first), boot_of(second));
+}

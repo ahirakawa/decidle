@@ -3,6 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="decidle-token" content="__TOKEN__">
+<meta name="decidle-boot" content="__BOOT__">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Home</title>
 <style>
@@ -173,6 +174,8 @@
 <script>
 "use strict";
 const TOKEN = document.querySelector('meta[name="decidle-token"]').content;
+// The server was started again after this page was loaded: its token is no longer accepted.
+const BOOT = document.querySelector('meta[name="decidle-boot"]').content;
 // The kind of a row. A stopped row splits by attention: need (yes), noneed (no), unknown.
 const kind = s => s.state === "stopped" ? ({ yes: "need", no: "noneed" })[s.attention] || "unknown" : s.state;
 const LABEL = { decide: "決めてほしい", permission: "許可待ち", need: "確認してほしい", unknown: "止まっている", noneed: "対応は不要", working: "作業中", background: "裏で作業中" };
@@ -208,6 +211,7 @@ async function post(path, s) {
       body: JSON.stringify({ session_id: s.session_id, resolves: s.last_stop }),
     });
     const body = await res.json().catch(() => ({}));
+    if (res.status === 403) { alert("サーバーが起動し直されたので、ページを読み込み直す。もう一度押してほしい。"); return location.reload(); }
     if (!res.ok) alert(body.error || ("失敗: " + res.status));
   } catch (e) {
     alert("送れない: " + e.message);
@@ -358,6 +362,7 @@ async function refresh() {
     const res = await fetch("/api/sessions", { cache: "no-store" });
     const body = await res.json();
     if (!res.ok) throw new Error(body.error || res.status);
+    if (body.boot && body.boot !== BOOT) return location.reload();
     data = { sessions: body.sessions, skipped: body.skipped };
     draw();
     err.hidden = true;
