@@ -136,6 +136,30 @@
   .work span small { font: inherit; opacity: .7; margin-left: 6px; }
   .work span span { border: 0; padding: 0; transform: none; }
   #err { position: fixed; left: 0; right: 0; top: 0; z-index: 3; background: #b3261e; color: #fff; font-weight: 700; font-size: 13px; padding: 6px 14px; }
+  /* the report of the selected row, beside the list on a wide window */
+  @media (min-width: 1250px) {
+    .cols { display: grid; grid-template-columns: minmax(0, 860px) minmax(0, 1fr); gap: 0 30px; align-items: start; padding-right: 24px; }
+    #side { position: sticky; top: 14px; max-height: calc(100vh - 28px); overflow: auto; margin-top: 14px; max-width: 900px; }
+  }
+  @media (max-width: 1249px) { #side { margin: 22px 18px 0; } }
+  .rep { background: var(--paper); color: var(--ink); padding: 20px 24px 26px; font-size: 13.5px; line-height: 1.7; }
+  [data-skin="naname"] .rep { border-left: 10px solid var(--ac); }
+  [data-skin="shimen"] .rep { border: 3px solid var(--ink); box-shadow: 8px 8px 0 var(--ac); margin: 0 10px 12px 0; }
+  .rep .kick { font: 900 11px var(--num); letter-spacing: .3em; opacity: .6; display: flex; justify-content: space-between; }
+  .rep .kick a { color: inherit; letter-spacing: 0; font: 700 11px var(--jp); }
+  .rep h2 { font-size: 22px; font-weight: 900; line-height: 1.3; margin: 2px 0 6px; } [data-skin="shimen"] .rep h2 { font-family: var(--min); }
+  .rep .goal { font-size: 12px; opacity: .75; margin: 0 0 12px; }
+  .rep .concl { font-weight: 700; font-size: 15px; margin: 0; }
+  .rep h3 { font: 900 12px var(--jp); letter-spacing: .1em; margin: 22px 0 8px; padding-bottom: 2px; border-bottom: 3px solid var(--ink); display: inline-block; }
+  .rep ul { margin: 0; padding-left: 1.2em; } .rep li { margin-bottom: 5px; } .rep .un li { opacity: .8; }
+  .rep .q { font-weight: 900; font-size: 15px; margin: 6px 0 4px; }
+  .rep .opt { border: 2px solid var(--ink); padding: 6px 10px; margin: 6px 0; } .rep .opt b { display: block; }
+  .rep .opt.on { background: var(--ink); color: var(--paper); }
+  .rep .badge { display: inline-block; margin-left: 8px; padding: 0 7px; font-size: 10.5px; font-weight: 900; background: var(--ac); color: #111; } [data-skin="shimen"] .rep .badge { color: #fff; }
+  .rep .why { font-size: 12.5px; opacity: .85; margin: 4px 0 14px; }
+  .rep .path { display: block; font: 600 12px ui-monospace, Menlo, monospace; word-break: break-all; }
+  .rep .chg { font-size: 12px; opacity: .85; margin: 3px 0 0; padding-left: 10px; border-left: 3px solid currentColor; }
+  .rep .gone { opacity: .7; }
   .foot { margin: 14px 18px 0; font-size: 11px; opacity: .55; }
 </style>
 </head>
@@ -144,7 +168,7 @@
 <header><div class="shard b"></div><div class="shard"></div><div class="block"></div>
   <div class="big" id="n"></div><div class="title"><small>WAITING FOR YOU</small>あなた待ち</div>
   <div class="issue"><b id="clk"></b><span id="date"></span></div></header>
-<nav id="list" class="first"></nav><div class="work" id="work"></div><div class="foot" id="foot"></div>
+<div class="cols"><div><nav id="list" class="first"></nav><div class="work" id="work"></div><div class="foot" id="foot"></div></div><aside id="side"></aside></div>
 <div class="skin" id="skin"></div>
 <script>
 "use strict";
@@ -173,7 +197,7 @@ function h(tag, attrs, ...kids) {
     else if (k === "data") Object.assign(el.dataset, v);
     else el.setAttribute(k, v);
   }
-  for (const k of kids.flat(3)) if (k != null && k !== false) el.append(k);
+  for (const k of kids.flat(Infinity)) if (k != null && k !== false) el.append(k);
   return el;
 }
 async function post(path, s) {
@@ -237,6 +261,45 @@ function item(s, i) {
       h("span", { class: "wt", data: { from: since(s) } }, h("span", { class: "v" }), h("small", {})))),
     on ? sheet(s) : null].filter(Boolean);
 }
+// The report of the selected row, read from the server by session id and drawn here, so that
+// it takes the colors of the page. Everything in it is text the agent wrote: only textContent.
+let rep = { key: null, body: null };
+const arr = x => Array.isArray(x) ? x : [];
+const str = x => typeof x === "string" ? x : "";
+function drawSide(s) {
+  const side = document.getElementById("side"), r = rep.body;
+  if (!s || !s.report_title) return side.replaceChildren();
+  if (!r) return side.replaceChildren(h("article", { class: "rep" }, h("div", { class: "kick" }, "REPORT"), h("h2", {}, s.report_title), h("p", { class: "gone" }, rep.key ? "報告のファイルを読めない(もう消えているかもしれない)。" : "読み込み中…")));
+  side.replaceChildren(h("article", { class: "rep" },
+    h("div", { class: "kick" }, "REPORT", s.report_url ? h("a", { href: s.report_url, target: "_blank", rel: "noopener" }, "別のタブで開く") : null),
+    h("h2", {}, str(r.title) || s.report_title),
+    str(r.goal) ? h("p", { class: "goal" }, "目的: " + r.goal) : null,
+    h("p", { class: "concl" }, str(r.conclusion)),
+    arr(r.decisions).length ? [h("h3", {}, "決めてほしいこと"), arr(r.decisions).map(d => [
+      h("div", { class: "q" }, str(d.question)),
+      arr(d.options).map(o => h("div", { class: "opt" + (o.label === d.recommend ? " on" : "") }, h("b", {}, str(o.label), o.label === d.recommend ? h("span", { class: "badge" }, "推奨") : null), str(o.effect))),
+      str(d.reason) ? h("p", { class: "why" }, "理由: " + d.reason) : null])] : null,
+    arr(r.verified).length ? [h("h3", {}, "確かめたこと"), h("ul", {}, arr(r.verified).map(v => h("li", {}, str(v))))] : null,
+    arr(r.unverified).length ? [h("h3", {}, "確かめていないこと"), h("ul", { class: "un" }, arr(r.unverified).map(v => h("li", {}, str(v))))] : null,
+    arr(r.deliverables).length ? [h("h3", {}, "成果物"), h("ul", {}, arr(r.deliverables).map(d => h("li", {},
+      h("span", { class: "path" }, str(d.path)), str(d.summary),
+      arr(d.changes).map(c => h("div", { class: "chg" }, (c.line != null ? "L" + c.line + ": " : "") + str(c.before) + " → " + str(c.after))))))] : null));
+}
+async function loadSide(s) {
+  const key = s && s.report_title ? s.session_id + "|" + s.last_stop : null;
+  if (key === rep.key) return;
+  rep = { key: null, body: null };
+  drawSide(s);
+  if (!key) return;
+  let body = null;
+  try {
+    const res = await fetch("/api/report?session_id=" + encodeURIComponent(s.session_id), { cache: "no-store" });
+    const out = await res.json();
+    if (res.ok) body = out.report;
+  } catch (_) {}
+  rep = { key, body };
+  drawSide(data.sessions.find(x => x.session_id === sel));
+}
 function rows() {
   const all = data.sessions.filter(s => s.state !== "working" && s.state !== "background");
   return [all.filter(s => s.waits_for_human), all.filter(s => !s.waits_for_human)];
@@ -255,6 +318,7 @@ function draw() {
   const [wait, done] = rows(), all = wait.concat(done), sk = document.body.dataset.skin;
   if (!all.some(s => s.session_id === sel)) sel = all.length ? all[0].session_id : null;
   document.title = (wait.length ? "(" + wait.length + ") " : "") + "Home";
+  loadSide(all.find(s => s.session_id === sel));
   // Rebuild only when something changed, so that a click is not lost to the 5 second refresh.
   const sig = JSON.stringify([data, sel, sk]);
   if (sig === drawn) return tick();

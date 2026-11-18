@@ -844,3 +844,45 @@ fn focus_raises_the_terminal_app_and_answer_does_not() {
     let _ = claude.kill();
     let _ = claude.wait();
 }
+
+#[test]
+fn report_json_is_served_by_session_only_for_the_recorded_file() {
+    let dir = temp_dir();
+    let log = dir.join("events.jsonl");
+    let report = dir.join("task.report.json");
+    fs::write(&report, json!({"title": "題", "conclusion": "結論", "decisions": []}).to_string()).unwrap();
+    let not_json = dir.join("broken.report.json");
+    fs::write(&not_json, "not json").unwrap();
+    let link = dir.join("link.report.json");
+    std::os::unix::fs::symlink(&report, &link).unwrap();
+    let p = |x: &PathBuf| x.to_string_lossy().into_owned();
+    write_log(
+        &log,
+        &[
+            ("with", "start", json!({})),
+            ("with", "stop", json!({"report_title": "題", "report_path": p(&report)})),
+            ("none", "start", json!({})),
+            ("none", "stop", json!({})),
+            ("broken", "start", json!({})),
+            ("broken", "stop", json!({"report_title": "題", "report_path": p(&not_json)})),
+            ("linked", "start", json!({})),
+            ("linked", "stop", json!({"report_title": "題", "report_path": p(&link)})),
+            ("gone", "start", json!({})),
+            ("gone", "stop", json!({"report_title": "題", "report_path": p(&dir.join("missing.json"))})),
+        ],
+        SystemTime::now() - Duration::from_secs(60),
+    );
+    let (port, _) = start(&log);
+    let get = |q: &str| request(port, "GET", &format!("/api/report{q}"), &[], "");
+    let (status, body) = get("?session_id=with");
+    assert_eq!(status, 200, "{body}");
+    assert_eq!(serde_json::from_str::<Value>(&body).unwrap()["report"]["conclusion"], "結論");
+    for sid in ["none", "broken", "linked", "gone", "unknown"] {
+        assert_eq!(get(&format!("?session_id={sid}")).0, 404, "{sid}");
+    }
+    // The request cannot name a path.
+    assert_eq!(get("").0, 400);
+    assert_eq!(get(&format!("?session_id={}", p(&report))).0, 400);
+    assert_eq!(get("?session_id=..%2Fwith").0, 400);
+    assert_eq!(get(&format!("?path={}", p(&report))).0, 400);
+}

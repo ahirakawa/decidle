@@ -291,6 +291,7 @@ impl Server {
             },
             ("GET", path) if path.starts_with("/report/") => self.report_page(&req.target),
             ("GET", "/api/sessions") => self.sessions(),
+            ("GET", "/api/report") => self.report_json(&req.target),
             ("POST", "/api/resolve") => self.with_target(req, |t| self.resolve(t)),
             ("POST", "/api/kill") => self.with_target(req, |t| self.kill(t)),
             ("POST", "/api/focus") => self.with_target(req, |t| self.focus(t)),
@@ -329,6 +330,33 @@ impl Server {
         match recorded.map(read_page) {
             Some(Ok(body)) => Response { status: 200, content_type: "text/html; charset=utf-8", csp: REPORT_CSP, body },
             _ => error(404, "not found"),
+        }
+    }
+
+    /// The report JSON of the session's current stop, for the panel on the Home page. The
+    /// request names a session, never a path; the path comes from the stop line.
+    fn report_json(&self, raw_target: &str) -> Response {
+        let id = raw_target
+            .split_once('?')
+            .and_then(|(_, q)| q.split('&').find_map(|kv| kv.strip_prefix("session_id=")))
+            .filter(|id| !id.is_empty() && id.len() <= 100 && id.chars().all(|c| c.is_ascii_alphanumeric() || c == '-'));
+        let Some(id) = id else {
+            return error(400, "session_id が要る");
+        };
+        let session = match self.find(id) {
+            Ok(s) => s,
+            Err(r) => return r,
+        };
+        let report = session
+            .report_path
+            .as_deref()
+            .filter(|p| p.starts_with('/'))
+            .and_then(|p| read_page(p).ok())
+            .and_then(|text| serde_json::from_str::<Value>(&text).ok())
+            .filter(Value::is_object);
+        match report {
+            Some(report) => json_response(200, json!({ "ok": true, "report": report })),
+            None => error(404, "報告のファイルがない"),
         }
     }
 
