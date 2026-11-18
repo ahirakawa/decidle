@@ -441,11 +441,6 @@ fn only_recorded_report_pages_are_served() {
     assert_eq!(Some(link.clone()), server::report_link(&html));
     let (status, body) = request(port, "GET", &link, &[], "");
     assert_eq!((status, body.as_str()), (200, "<p>recorded</p>"));
-    // The Home page passes its look; the server writes it on the body tag.
-    fs::write(reports.join("t.html"), "<html><body><p>recorded</p></body></html>").unwrap();
-    let (status, body) = request(port, "GET", &format!("{link}?skin=shimen"), &[], "");
-    assert_eq!((status, body.as_str()), (200, "<html><body data-skin=\"shimen\"><p>recorded</p></body></html>"));
-    assert_eq!(request(port, "GET", &format!("{link}?skin=evil"), &[], "").0, 404);
 
     let folder = link.strip_suffix("/t.html").unwrap();
     let refused = [

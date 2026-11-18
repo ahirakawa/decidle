@@ -274,7 +274,7 @@ function drawSide(s) {
   if (!s || !s.report_title) return side.replaceChildren();
   if (!r) return side.replaceChildren(h("article", { class: "rep" }, h("div", { class: "kick" }, "REPORT"), h("h2", {}, s.report_title), h("p", { class: "gone" }, rep.key ? "報告のファイルを読めない(もう消えているかもしれない)。" : "読み込み中…")));
   side.replaceChildren(h("article", { class: "rep" },
-    h("div", { class: "kick" }, "REPORT", s.report_url ? h("a", { href: s.report_url + "?skin=" + document.body.dataset.skin, target: "_blank", rel: "noopener" }, "別のタブで開く") : null),
+    h("div", { class: "kick" }, "REPORT", s.report_url ? h("a", { href: s.report_url, target: "_blank", rel: "noopener" }, "別のタブで開く") : null),
     h("h2", {}, str(r.title) || s.report_title),
     str(r.goal) ? h("p", { class: "goal" }, "目的: " + r.goal) : null,
     h("p", { class: "concl" }, str(r.conclusion)),
