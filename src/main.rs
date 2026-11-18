@@ -55,11 +55,12 @@ fn clean(args: &[String]) -> i32 {
             return 1;
         }
     };
-    if cfg.clean_after_days == 0 {
-        eprintln!("decidle clean: config の clean_after_days が 0 なので消さない");
+    let settings = cfg.clean_settings();
+    if settings.off() {
+        eprintln!("decidle clean: config の clean_after_days と clean_unanswered_after_days が 0 なので消さない");
         return 0;
     }
-    match home::clean::run(&home::events::events_path(), &cfg.clean_settings(), dry_run) {
+    match home::clean::run(&home::events::events_path(), &settings, dry_run) {
         Ok(o) => {
             home::clean::report(&o, dry_run);
             0

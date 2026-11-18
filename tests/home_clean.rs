@@ -67,7 +67,7 @@ fn write_log(path: &Path, lines: &[(&str, &str, Value, u64)]) {
 }
 
 fn settings() -> Settings {
-    Settings { after_days: 1, report_dir: ".decidle".into() }
+    Settings { after_days: 1, unanswered_after_days: 7, report_dir: ".decidle".into() }
 }
 
 fn exists(p: &str) -> bool {
@@ -135,7 +135,7 @@ fn open_shown_recent_and_reused_reports_are_kept() {
         ("C", "prompt", n.clone(), 3 * DAY), ("C", "stop", stop(&stopped, 0), 60),
         // Stopped two days ago: hidden after 12 hours, but never resolved or ended.
         ("D", "prompt", n.clone(), 3 * DAY), ("D", "stop", stop(&stale, 0), 2 * DAY),
-        // Decisions asked, then the session ended without anyone answering.
+        // Decisions asked, then the session ended without anyone answering, 2 days ago (< 7).
         ("E", "prompt", n.clone(), 3 * DAY), ("E", "stop", stop(&open, 2), 3 * DAY), ("E", "end", n.clone(), 2 * DAY),
         // The same path recorded by an ended session and by one that is still stopped.
         ("F", "prompt", n.clone(), 3 * DAY), ("F", "stop", stop(&shared, 0), 3 * DAY), ("F", "end", n.clone(), 2 * DAY),
@@ -212,9 +212,9 @@ fn zero_days_turns_cleaning_off() {
     let log = dir.join("events.jsonl");
     let r = report(&dir.join("a"), "t", 3 * DAY);
     write_log(&log, &[("A", "stop", stop(&r, 0), 3 * DAY), ("A", "end", json!({}), 2 * DAY)]);
-    let o = clean::run(&log, &Settings { after_days: 0, report_dir: ".decidle".into() }, false).unwrap();
+    let o = clean::run(&log, &Settings { after_days: 0, unanswered_after_days: 0, report_dir: ".decidle".into() }, false).unwrap();
     assert!(o.deleted.is_empty());
-    let o = clean::run(&log, &Settings { after_days: 3, report_dir: ".decidle".into() }, false).unwrap();
+    let o = clean::run(&log, &Settings { after_days: 3, unanswered_after_days: 7, report_dir: ".decidle".into() }, false).unwrap();
     assert!(o.deleted.is_empty());
     assert!(exists(&r.0) && exists(&r.1));
 }
@@ -249,4 +249,97 @@ fn clean_command_dry_run_lists_and_keeps() {
     // Nothing is written to events.jsonl.
     assert_eq!(fs::read_to_string(&log).unwrap(), before);
     assert!(!run(&["--bogus"]).status.success());
+}
+
+/// Reports whose decisions nobody answered before the session ended: deleted after
+/// clean_unanswered_after_days, independently of clean_after_days.
+#[test]
+fn unanswered_reports_are_deleted_after_their_own_days() {
+    let dir = temp_dir();
+    let log = dir.join("events.jsonl");
+    let n = json!({});
+    let six = report(&dir.join("a"), "t", 10 * DAY);
+    let eight = report(&dir.join("b"), "t", 10 * DAY);
+    let answered = report(&dir.join("c"), "t", 10 * DAY);
+    let shown = report(&dir.join("d"), "t", 10 * DAY);
+    let stale = report(&dir.join("e"), "t", 30 * DAY);
+    let background = report(&dir.join("f"), "t", 30 * DAY);
+    write_log(&log, &[
+        // Ended 6 days ago and 8 days ago with the decisions unanswered.
+        ("A", "prompt", n.clone(), 10 * DAY), ("A", "stop", stop(&six, 2), 10 * DAY), ("A", "end", n.clone(), 6 * DAY),
+        ("B", "prompt", n.clone(), 10 * DAY), ("B", "stop", stop(&eight, 1), 10 * DAY), ("B", "end", n.clone(), 8 * DAY),
+        // No decisions, ended 8 days ago: the clean_after_days kind.
+        ("C", "prompt", n.clone(), 10 * DAY), ("C", "stop", stop(&answered, 0), 10 * DAY), ("C", "end", n.clone(), 8 * DAY),
+        // Not ended: shown on the Home page now, or stopped for 30 days and hidden, or waiting on
+        // background work.
+        ("D", "prompt", n.clone(), 10 * DAY), ("D", "stop", stop(&shown, 1), 60),
+        ("E", "prompt", n.clone(), 30 * DAY), ("E", "stop", stop(&stale, 1), 30 * DAY),
+        ("F", "prompt", n.clone(), 30 * DAY),
+        ("F", "stop", json!({"report_path": background.0, "report_html": background.1, "decisions": 1, "background": true}), 30 * DAY),
+    ]);
+    let s = |after_days, unanswered_after_days| Settings { after_days, unanswered_after_days, report_dir: ".decidle".into() };
+    let listed = |o: &clean::Outcome| -> Vec<String> { o.deleted.iter().map(|p| p.to_string_lossy().into_owned()).collect() };
+
+    // 0 turns the unanswered kind off; the other kind still runs.
+    let o = clean::run(&log, &s(1, 0), true).unwrap();
+    assert_eq!(listed(&o), vec![answered.1.clone(), answered.0.clone()]);
+    // clean_after_days 0 turns only the other kind off: the 8-day unanswered report goes, the 6-day one stays.
+    let o = clean::run(&log, &s(0, 7), true).unwrap();
+    assert_eq!(listed(&o), vec![eight.1.clone(), eight.0.clone()]);
+    // Both on: 7 days or more goes, less than 7 stays, sessions that have not ended stay.
+    let o = clean::run(&log, &s(1, 7), false).unwrap();
+    assert_eq!(o.deleted.len(), 4, "{:?} {:?}", o.deleted, o.refused);
+    assert!(!exists(&eight.0) && !exists(&eight.1) && !exists(&answered.0) && !exists(&answered.1));
+    for p in [&six, &shown, &stale, &background] {
+        assert!(exists(&p.0) && exists(&p.1), "{p:?}");
+    }
+    // A shorter limit reaches the 6-day one too.
+    let o = clean::run(&log, &s(1, 5), false).unwrap();
+    assert_eq!(listed(&o), vec![six.1.clone(), six.0.clone()]);
+}
+
+#[test]
+fn unanswered_report_still_used_by_another_session_is_kept() {
+    let dir = temp_dir();
+    let log = dir.join("events.jsonl");
+    let n = json!({});
+    let shared = report(&dir.join("a"), "t", 10 * DAY);
+    let rewritten = report(&dir.join("b"), "t", 60);
+    write_log(&log, &[
+        ("A", "prompt", n.clone(), 10 * DAY), ("A", "stop", stop(&shared, 1), 10 * DAY), ("A", "end", n.clone(), 8 * DAY),
+        ("A2", "prompt", n.clone(), 10 * DAY), ("A2", "stop", stop(&shared, 0), 60),
+        // Written again after the session ended.
+        ("B", "prompt", n.clone(), 10 * DAY), ("B", "stop", stop(&rewritten, 1), 10 * DAY), ("B", "end", n.clone(), 8 * DAY),
+    ]);
+    let o = clean::run(&log, &settings(), false).unwrap();
+    assert!(o.deleted.is_empty(), "{:?}", o.deleted);
+    assert_eq!(o.refused.len(), 2, "{:?}", o.refused);
+    assert!(exists(&shared.0) && exists(&shared.1) && exists(&rewritten.0) && exists(&rewritten.1));
+}
+
+/// An accepted kill ends the session but does not answer the decisions: the report is counted
+/// with clean_unanswered_after_days, not clean_after_days.
+#[test]
+fn report_ended_by_kill_with_decisions_counts_as_unanswered() {
+    let dir = temp_dir();
+    let log = dir.join("events.jsonl");
+    let n = json!({});
+    let six = report(&dir.join("a"), "t", 10 * DAY);
+    let eight = report(&dir.join("b"), "t", 10 * DAY);
+    let no_decisions = report(&dir.join("c"), "t", 10 * DAY);
+    write_log(&log, &[
+        ("A", "prompt", n.clone(), 10 * DAY), ("A", "stop", stop(&six, 2), 10 * DAY), ("A", "kill", n.clone(), 6 * DAY),
+        ("B", "prompt", n.clone(), 10 * DAY), ("B", "stop", stop(&eight, 1), 10 * DAY), ("B", "kill", n.clone(), 8 * DAY),
+        ("C", "prompt", n.clone(), 10 * DAY), ("C", "stop", stop(&no_decisions, 0), 10 * DAY), ("C", "kill", n.clone(), 6 * DAY),
+    ]);
+    let o = clean::run(&log, &settings(), false).unwrap();
+    let deleted: Vec<String> = o.deleted.iter().map(|p| p.to_string_lossy().into_owned()).collect();
+    assert_eq!(deleted, vec![eight.1.clone(), eight.0.clone(), no_decisions.1.clone(), no_decisions.0.clone()], "{:?}", o.refused);
+    assert!(exists(&six.0) && exists(&six.1));
+    // With the unanswered kind off, the killed report with decisions stays at any age.
+    let six_more = report(&dir.join("d"), "t", 30 * DAY);
+    write_log(&log, &[("D", "prompt", n.clone(), 30 * DAY), ("D", "stop", stop(&six_more, 1), 30 * DAY), ("D", "kill", n.clone(), 20 * DAY)]);
+    let o = clean::run(&log, &Settings { after_days: 1, unanswered_after_days: 0, report_dir: ".decidle".into() }, false).unwrap();
+    assert!(o.deleted.is_empty());
+    assert!(exists(&six_more.0));
 }

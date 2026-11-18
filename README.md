@@ -32,7 +32,7 @@ Claude Code の Stop hook。エージェントに報告を JSON で書かせ、�
 - 字数の上限やコード扱いの拡張子は、`config.default.json` と同じ形のファイルを `~/.config/decidle/config.json` に置くと、書いたキーだけ上書きされる。
 - 報告の JSON とページは、作業したフォルダの `.decidle/` にできる。git に入れたくなければ、各自の gitignore に足す。
 - 報告のページは、Home ページの行の題から開く。Home は `decidle serve` で起動し、`http://127.0.0.1:7878/` で開く(ポートは設定の `home_port`)。仕様は `docs/spec-home.md` にある。
-- 報告の JSON とページは、セッションが解決か終了になってから 1 日経つと消える(SPEC AMENDMENT、2026-11-18 依頼者承認)。`decidle serve` が起動時と 1 日 1 回消し、手では `decidle clean` で消せる。`decidle clean --dry-run` は消すものの一覧だけを出す。日数は設定の `clean_after_days` で変えられ、0 にすると消さない。決めてほしいことが残る報告、Home に出ているセッションの報告、記録にないファイル、`.decidle/` の外のファイルは消さない。条件の詳細は `docs/spec-home.md` の「報告の自動削除」にある。
+- 報告の JSON とページは、セッションが解決か終了になってから 1 日経つと消える(SPEC AMENDMENT、2026-11-18 依頼者承認)。`decidle serve` が起動時と 1 日 1 回消し、手では `decidle clean` で消せる。`decidle clean --dry-run` は消すものの一覧だけを出す。日数は設定の `clean_after_days` で変えられ、0 にすると消さない。決めてほしいことが答えられないまま終わった報告(終了ボタンで終えたものを含む)は、終了から 7 日経つと消える(SPEC AMENDMENT、2026-11-18 依頼者承認)。日数は `clean_unanswered_after_days` で変えられ、0 にすると消さない。2 つの設定は互いに独立に効く。終わっていないセッションの報告、Home に出ているセッションの報告、記録にないファイル、`.decidle/` の外のファイルは消さない。条件の詳細は `docs/spec-home.md` の「報告の自動削除」にある。
 - 報告ごとに Maestri の portal を出す機能は、既定で止めてある。戻すには、設定の `portal_command` を `"maestri"` にする。戻すと、Maestri のターミナルでは、ページを書いたあと作業名の portal をキャンバスに出す。まとめ役が起動した作業ターミナル(Maestro ではなく、ほかのエージェントとつながっているターミナル)では出さない。
 
 ## 修正依頼の回数を数える

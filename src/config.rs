@@ -43,11 +43,18 @@ pub struct Config {
     /// Reports of a session resolved or ended this many days ago are deleted by `decidle serve`
     /// and `decidle clean`. 0 turns this off.
     pub clean_after_days: u64,
+    /// Reports whose decisions were never answered are deleted this many days after the session
+    /// ended. 0 turns this off. Independent of clean_after_days.
+    pub clean_unanswered_after_days: u64,
 }
 
 impl Config {
     pub fn clean_settings(&self) -> decidle::home::clean::Settings {
-        decidle::home::clean::Settings { after_days: self.clean_after_days, report_dir: self.report_dir.clone() }
+        decidle::home::clean::Settings {
+            after_days: self.clean_after_days,
+            unanswered_after_days: self.clean_unanswered_after_days,
+            report_dir: self.report_dir.clone(),
+        }
     }
 }
 

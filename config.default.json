@@ -81,5 +81,6 @@
   ],
   "portal_command": "",
   "home_port": 7878,
-  "clean_after_days": 1
+  "clean_after_days": 1,
+  "clean_unanswered_after_days": 7
 }

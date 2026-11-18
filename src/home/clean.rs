@@ -19,6 +19,9 @@ const DAY_US: i64 = 24 * 3600 * 1_000_000;
 pub struct Settings {
     /// Days after a session is resolved or ended before its reports are deleted. 0 turns this off.
     pub after_days: u64,
+    /// Days after a session ended before a report whose decisions nobody answered is deleted.
+    /// 0 turns this off. Independent of `after_days`.
+    pub unanswered_after_days: u64,
     /// The folder name the reports live in (config `report_dir`, `.decidle` by default).
     pub report_dir: String,
 }
@@ -31,6 +34,13 @@ pub struct Candidate {
     pub closed_us: i64,
 }
 
+impl Settings {
+    /// Both kinds are turned off.
+    pub fn off(&self) -> bool {
+        self.after_days == 0 && self.unanswered_after_days == 0
+    }
+}
+
 fn closed(st: St) -> bool {
     matches!(st, St::Resolved | St::Ended)
 }
@@ -41,7 +51,8 @@ struct Track {
     /// When the session became resolved or ended, if it still is.
     closed_since: Option<i64>,
     /// The paths of the current stop when it asks for decisions that nobody has answered:
-    /// cleared by a prompt, by a resolved or kill line that the reducer accepts, and by a newer stop.
+    /// cleared by a prompt, by a resolved line that the reducer accepts, and by a newer stop.
+    /// An accepted kill ends the session but does not answer the decisions.
     open: Vec<String>,
     recorded: Vec<String>,
 }
@@ -52,8 +63,11 @@ fn paths_of(ev: &Event) -> Vec<String> {
 
 /// Which recorded paths the records allow to delete. Pure: the file system is not looked at.
 /// A path is kept when any session that recorded it is not resolved or ended, became so less than
-/// `after_us` ago, is shown on the Home page, or still waits for decisions in that report.
-pub fn candidates(events: &[Event], now_us: i64, after_us: i64) -> Vec<Candidate> {
+/// the limit ago, or is shown on the Home page. The limit is `after_us` for a report without
+/// unanswered decisions and `unanswered_us` for one with them (a session can only end with
+/// unanswered decisions through an end line or an accepted kill; an accepted resolved answers them).
+/// None turns that kind of report off.
+pub fn candidates(events: &[Event], now_us: i64, after_us: Option<i64>, unanswered_us: Option<i64>) -> Vec<Candidate> {
     let mut index: HashMap<&str, usize> = HashMap::new();
     let mut tracks: Vec<Track> = Vec::new();
     for ev in events {
@@ -77,7 +91,7 @@ pub fn candidates(events: &[Event], now_us: i64, after_us: i64) -> Vec<Candidate
                 t.open = if ev.decisions > 0 { paths } else { Vec::new() };
             }
             Some(Kind::Prompt) => t.open.clear(),
-            Some(Kind::Resolved | Kind::Kill) if after != before => t.open.clear(),
+            Some(Kind::Resolved) if after != before => t.open.clear(),
             _ => {}
         }
     }
@@ -85,9 +99,13 @@ pub fn candidates(events: &[Event], now_us: i64, after_us: i64) -> Vec<Candidate
     let mut verdict: BTreeMap<&str, Option<i64>> = BTreeMap::new();
     for t in &tracks {
         let shown = state::shown(&t.acc) && now_us - t.acc.last_us < state::HIDE_AFTER_US;
-        let old_enough = t.closed_since.filter(|c| closed(t.acc.st) && now_us - c >= after_us && !shown);
+        let closed_at = t.closed_since.filter(|_| closed(t.acc.st) && !shown);
         for p in &t.recorded {
-            let allow = old_enough.filter(|_| !t.open.contains(p));
+            let limit = if t.open.contains(p) { unanswered_us } else { after_us };
+            let allow = match (closed_at, limit) {
+                (Some(c), Some(l)) if now_us - c >= l => Some(c),
+                _ => None,
+            };
             let entry = verdict.entry(p.as_str()).or_insert(allow);
             *entry = match (*entry, allow) {
                 (Some(a), Some(b)) => Some(a.max(b)),
@@ -159,12 +177,12 @@ fn now_us() -> i64 {
 /// Reads events.jsonl and deletes what may be deleted. With dry_run nothing is deleted.
 pub fn run(events_path: &Path, settings: &Settings, dry_run: bool) -> Result<Outcome, String> {
     let mut out = Outcome { deleted: Vec::new(), refused: Vec::new() };
-    if settings.after_days == 0 {
+    if settings.off() {
         return Ok(out);
     }
     let loaded = read::load(events_path)?;
-    let after_us = (settings.after_days as i64).saturating_mul(DAY_US);
-    for c in candidates(&loaded.events, now_us(), after_us) {
+    let days = |d: u64| (d > 0).then(|| (d as i64).saturating_mul(DAY_US));
+    for c in candidates(&loaded.events, now_us(), days(settings.after_days), days(settings.unanswered_after_days)) {
         let path = PathBuf::from(&c.path);
         if fs::symlink_metadata(&path).is_err_and(|e| e.kind() == io::ErrorKind::NotFound) {
             continue;
@@ -219,7 +237,7 @@ pub fn report(o: &Outcome, dry_run: bool) {
 
 /// For `decidle serve`: runs now, then once a day, on its own thread.
 pub fn spawn_daily(events_path: PathBuf, settings: Settings) {
-    if settings.after_days == 0 {
+    if settings.off() {
         return;
     }
     std::thread::spawn(move || loop {
