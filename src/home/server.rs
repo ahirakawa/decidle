@@ -29,7 +29,7 @@ pub struct Server {
     token: String,
     events: PathBuf,
     /// Runs one terminal command. Tests replace it.
-    runner: fn(&[String]) -> Result<(), String>,
+    runner: fn(&[String]) -> Result<String, String>,
 }
 
 struct Request {
@@ -226,7 +226,7 @@ impl Server {
         Ok(Server { listener, port, token: random_token()?, events, runner: term::run })
     }
 
-    pub fn set_runner(&mut self, runner: fn(&[String]) -> Result<(), String>) {
+    pub fn set_runner(&mut self, runner: fn(&[String]) -> Result<String, String>) {
         self.runner = runner;
     }
 
@@ -415,6 +415,9 @@ impl Server {
         let Some(commands) = term::focus_commands(&session) else {
             return error(409, "このセッションの端末は、Home から前に出せない");
         };
+        if let Err(r) = self.check_occupant(&session) {
+            return r;
+        }
         self.run_all(&commands)
     }
 
@@ -439,10 +442,25 @@ impl Server {
         let Some(commands) = term::answer_commands(&session, &text) else {
             return error(409, "このセッションの端末には、Home から答えを送れない");
         };
+        if let Err(r) = self.check_occupant(&session) {
+            return r;
+        }
         if let Err(e) = lock.append(events::resolution(&t.session_id, &session.cwd, "answer", &t.resolves)) {
             return error(500, &e.to_string());
         }
         self.run_all(&commands)
+    }
+
+    /// Where pane ids are reused (herdr), asks the terminal which session the pane holds now.
+    fn check_occupant(&self, session: &Session) -> Result<(), Response> {
+        let Some(argv) = term::occupant_command(session) else {
+            return Ok(());
+        };
+        match (self.runner)(&argv) {
+            Ok(out) if term::occupant_is(&out, &session.session_id) => Ok(()),
+            Ok(_) => Err(error(409, "記録したペインには、いま別のものが入っている")),
+            Err(e) => Err(error(409, &format!("記録したペインに、このセッションが見つからない: {e}"))),
+        }
     }
 
     fn run_all(&self, commands: &[Vec<String>]) -> Response {

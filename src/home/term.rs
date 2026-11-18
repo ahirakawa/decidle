@@ -113,8 +113,33 @@ pub fn answer_commands(s: &Session, text: &str) -> Option<Vec<Vec<String>>> {
     }
 }
 
-/// Runs one command without a shell. Err carries what to tell the human.
-pub fn run(argv: &[String]) -> Result<(), String> {
+/// herdr numbers panes by position, so a recorded pane id can come to name another pane.
+/// The command whose output says which agent session the pane holds now; None for terminals
+/// whose ids are not reused.
+pub fn occupant_command(s: &Session) -> Option<Vec<String>> {
+    match (s.term.as_deref()?, s.term_id.as_deref()?) {
+        ("herdr", id) => Some(vec!["herdr".into(), "agent".into(), "get".into(), id.into()]),
+        _ => None,
+    }
+}
+
+/// Whether the output of `occupant_command` names this session.
+pub fn occupant_is(output: &str, session_id: &str) -> bool {
+    serde_json::from_str::<serde_json::Value>(output)
+        .ok()
+        .and_then(|v| v.pointer("/result/agent/agent_session/value").and_then(|x| x.as_str()).map(|x| x == session_id))
+        .unwrap_or(false)
+}
+
+/// herdr exits with 0 and prints an object with an `error` key when it refuses. Returns the message.
+fn refusal(stdout: &str) -> Option<String> {
+    let v = serde_json::from_str::<serde_json::Value>(stdout.trim()).ok()?;
+    let e = v.get("error")?;
+    Some(e.get("message").and_then(|m| m.as_str()).unwrap_or("error").chars().take(200).collect())
+}
+
+/// Runs one command without a shell and returns its stdout. Err carries what to tell the human.
+pub fn run(argv: &[String]) -> Result<String, String> {
     let (program, args) = argv.split_first().ok_or("空の命令")?;
     let out = Command::new(program)
         .args(args)
@@ -122,9 +147,13 @@ pub fn run(argv: &[String]) -> Result<(), String> {
         .stdin(Stdio::null())
         .output()
         .map_err(|e: io::Error| format!("{program} を起動できない: {e}"))?;
-    if out.status.success() {
-        return Ok(());
+    let stdout = String::from_utf8_lossy(&out.stdout).into_owned();
+    if !out.status.success() {
+        let msg = if out.stderr.is_empty() { stdout } else { String::from_utf8_lossy(&out.stderr).into_owned() };
+        return Err(format!("{program}: {}", msg.trim().chars().take(200).collect::<String>()));
     }
-    let msg = String::from_utf8_lossy(if out.stderr.is_empty() { &out.stdout } else { &out.stderr });
-    Err(format!("{program}: {}", msg.trim().chars().take(200).collect::<String>()))
+    match refusal(&stdout) {
+        Some(msg) => Err(format!("{program}: {msg}")),
+        None => Ok(stdout),
+    }
 }

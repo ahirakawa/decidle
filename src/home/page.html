@@ -207,7 +207,7 @@ const btn = (cls, text, onclick, title) => h("button", { class: "cmd " + cls, on
 function say(s) {
   if (s.state === "permission") return "ターミナルで許可を出してほしい";
   const qs = s.questions || [], rs = s.recommends || [];
-  if (s.state === "decide" && qs.length) return h("ul", {}, qs.map((q, i) => h("li", {}, q, rs[i] ? h("span", { class: "rec" }, "勧め: " + rs[i]) : null)));
+  if (s.state === "decide" && qs.length) return h("ul", {}, qs.map((q, i) => h("li", {}, q, rs[i] ? h("span", { class: "rec" }, "推奨: " + rs[i]) : null)));
   if (s.state === "decide") return "決めてほしいこと " + s.decisions + " 件";
   return s.note || MISSING;
 }
@@ -219,9 +219,10 @@ function sheet(s) {
     h("span", { class: "lab" }, s.folder + " ／ " + LABEL[k]),
     h("div", { class: "say" }, say(s)),
     h("div", { class: "meta", title: s.session_id }, [s.report_goal ? "目的: " + s.report_goal : null, startLabel(s), s.agent === "codex" ? "Codex" : null, s.term].filter(Boolean).join(" ・ ")),
-    s.answer_text ? h("div", { class: "send" }, h("b", {}, "「勧めで答える」で端末に送る文"), s.answer_text) : null,
+    close && !s.term ? h("div", { class: "meta" }, "この端末は Home から操作できない(herdr か cmux の中で始めたセッションだけ)") : null,
+    s.answer_text ? h("div", { class: "send" }, h("b", {}, "「推奨で進める」で端末に送る文"), s.answer_text) : null,
     h("div", { class: "cmds" },
-      s.answer_text ? btn("go", "勧めで答える", () => post("/api/answer", s), "上の文を端末に入力して Enter を押す") : null,
+      s.answer_text ? btn("go", "推奨で進める", () => post("/api/answer", s), "上の文を端末に入力して Enter を押す") : null,
       close && s.term ? btn(first === "focus" ? "go" : "sub", "端末へ行く", () => post("/api/focus", s), "このセッションの端末を前に出す") : null,
       s.report_url ? h("a", { class: "cmd sub", href: s.report_url, target: "_blank", rel: "noopener" }, h("span", {}, "報告を開く")) : null,
       close ? btn(first === "resolve" ? "go" : "sub", "外す", () => post("/api/resolve", s), "見たので一覧から外す。エージェントには何も送らない") : null,

@@ -587,17 +587,17 @@ fn rows_carry_questions_goal_and_times() {
 
 static CALLS: std::sync::Mutex<Vec<Vec<String>>> = std::sync::Mutex::new(Vec::new());
 
-fn record_call(argv: &[String]) -> Result<(), String> {
+fn record_call(argv: &[String]) -> Result<String, String> {
     CALLS.lock().unwrap().push(argv.to_vec());
-    Ok(())
+    Ok(String::new())
 }
 
-fn refuse_call(_: &[String]) -> Result<(), String> {
+fn refuse_call(_: &[String]) -> Result<String, String> {
     Err("cmux: アクセスが拒否されました".into())
 }
 
 /// Like `start`, with the terminal commands replaced.
-fn start_with(log: &PathBuf, runner: fn(&[String]) -> Result<(), String>) -> (u16, String) {
+fn start_with(log: &PathBuf, runner: fn(&[String]) -> Result<String, String>) -> (u16, String) {
     let mut server = Server::bind(0, log.clone()).unwrap();
     server.set_runner(runner);
     let port = server.port();
@@ -746,6 +746,56 @@ fn a_terminal_command_that_fails_is_reported_as_502() {
     // The answer line was written before the command ran, so a second press is refused.
     assert_eq!(count_of(&log, "answer"), 1);
     assert_eq!(post(port, "/api/answer", &token, &target).0, 409);
+    let _ = claude.kill();
+    let _ = claude.wait();
+}
+
+static HERDR_CALLS: std::sync::Mutex<Vec<Vec<String>>> = std::sync::Mutex::new(Vec::new());
+
+/// A herdr whose pane w1:p2 holds session "mine" and whose pane w1:p3 holds another session.
+fn fake_herdr(argv: &[String]) -> Result<String, String> {
+    HERDR_CALLS.lock().unwrap().push(argv.to_vec());
+    if argv[1..3] == ["agent".to_string(), "get".to_string()] {
+        let held = if argv[3] == "w1:p2" { "mine" } else { "someone-else" };
+        return Ok(json!({"result": {"agent": {"agent_session": {"value": held}}}}).to_string());
+    }
+    Ok(String::new())
+}
+
+#[test]
+fn herdr_pane_is_checked_to_still_hold_the_session_before_anything_is_typed() {
+    let dir = temp_dir();
+    let mut claude = fake_claude(&dir);
+    let pid = claude.id() as i64;
+    let started = procinfo::info(pid).unwrap().started;
+    let log = dir.join("events.jsonl");
+    let base = SystemTime::now() - Duration::from_secs(60);
+    let idle = transcript(&dir, "idle.jsonl", &[("user", base), ("assistant", base)]);
+    let rec = |pane: &str| json!({"pid": pid, "pid_started": started, "transcript_path": idle, "term": "herdr", "term_id": pane});
+    let asked = json!({"report_title": "題", "decisions": 1, "questions": ["問い"], "recommends": ["推奨"]});
+    let ts = write_log(
+        &log,
+        &[("mine", "start", rec("w1:p2")), ("mine", "stop", asked.clone()), ("moved", "start", rec("w1:p3")), ("moved", "stop", asked)],
+        base,
+    );
+    let (port, token) = start_with(&log, fake_herdr);
+    let strs = |v: &[&str]| v.iter().map(|s| s.to_string()).collect::<Vec<String>>();
+
+    // The pane was renumbered and now holds another session: refused, nothing typed or appended.
+    let moved = json!({"session_id": "moved", "resolves": ts[3]});
+    assert_eq!(post(port, "/api/answer", &token, &moved).0, 409);
+    assert_eq!(post(port, "/api/focus", &token, &moved).0, 409);
+    assert!(HERDR_CALLS.lock().unwrap().iter().all(|c| c[2] == "get"), "{:?}", HERDR_CALLS.lock().unwrap());
+    assert_eq!(count_of(&log, "answer"), 0);
+    HERDR_CALLS.lock().unwrap().clear();
+
+    let (status, out) = post(port, "/api/answer", &token, &json!({"session_id": "mine", "resolves": ts[1]}));
+    assert_eq!(status, 200, "{out}");
+    assert_eq!(
+        *HERDR_CALLS.lock().unwrap(),
+        vec![strs(&["herdr", "agent", "get", "w1:p2"]), strs(&["herdr", "agent", "prompt", "w1:p2", "問いは「推奨」で進めて。"])]
+    );
+    assert_eq!(count_of(&log, "answer"), 1);
     let _ = claude.kill();
     let _ = claude.wait();
 }
