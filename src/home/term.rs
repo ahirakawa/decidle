@@ -145,13 +145,6 @@ pub fn occupant_is(output: &str, session_id: &str) -> bool {
         .unwrap_or(false)
 }
 
-/// herdr exits with 0 and prints an object with an `error` key when it refuses. Returns the message.
-fn refusal(stdout: &str) -> Option<String> {
-    let v = serde_json::from_str::<serde_json::Value>(stdout.trim()).ok()?;
-    let e = v.get("error")?;
-    Some(e.get("message").and_then(|m| m.as_str()).unwrap_or("error").chars().take(200).collect())
-}
-
 /// Runs one command without a shell and returns its stdout. Err carries what to tell the human.
 pub fn run(argv: &[String]) -> Result<String, String> {
     let (program, args) = argv.split_first().ok_or("空の命令")?;
@@ -166,8 +159,5 @@ pub fn run(argv: &[String]) -> Result<String, String> {
         let msg = if out.stderr.is_empty() { stdout } else { String::from_utf8_lossy(&out.stderr).into_owned() };
         return Err(format!("{program}: {}", msg.trim().chars().take(200).collect::<String>()));
     }
-    match refusal(&stdout) {
-        Some(msg) => Err(format!("{program}: {msg}")),
-        None => Ok(stdout),
-    }
+    Ok(stdout)
 }
