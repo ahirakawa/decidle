@@ -108,6 +108,15 @@ impl Sandbox {
         self.run_raw(&input.to_string(), None)
     }
 
+    /// Lines of the Home page's events.jsonl.
+    fn events(&self) -> Vec<Value> {
+        fs::read_to_string(self.home.join(".local/share/agent-report-gate/events.jsonl"))
+            .unwrap_or_default()
+            .lines()
+            .map(|l| serde_json::from_str(l).unwrap())
+            .collect()
+    }
+
     fn log_lines(&self) -> Vec<Value> {
         fs::read_to_string(self.home.join(".local/share/agent-report-gate/gate.jsonl"))
             .unwrap_or_default()
@@ -128,6 +137,7 @@ fn bash(command: &str) -> Value {
 fn report(decisions: Value, verified: Value, deliverables: Value) -> Value {
     json!({
         "title": "設定の修正",
+        "goal": "設定の誤りで止まる作業を、また動くようにしたい。",
         "conclusion": "設定を直した。",
         "decisions": decisions,
         "verified": verified,
@@ -747,4 +757,239 @@ fn extract_pairs_prompts_with_previous_report() {
     assert_eq!(rows[1]["project"], "-Users-x-proj");
     assert_eq!(rows[1]["suspected_agent"], false);
     assert_eq!(rows[2]["suspected_agent"], true);
+}
+
+/// Checks that exactly `n` lines were written and that all are stop lines of session s1.
+fn stop_lines(sb: &Sandbox, n: usize) -> Vec<Value> {
+    let lines = sb.events();
+    assert_eq!(lines.len(), n, "{lines:?}");
+    for l in &lines {
+        assert_eq!(l["event"], "stop", "{l}");
+        assert_eq!(l["session_id"], "s1", "{l}");
+        assert_eq!(l["cwd"], sb.cwd.to_string_lossy().as_ref(), "{l}");
+    }
+    lines
+}
+
+#[test]
+fn passing_stop_records_the_report_on_the_home_page() {
+    let sb = Sandbox::new();
+    let decisions = json!([{
+        "question": "保存先をどちらにするか",
+        "options": [{"label": "ローカル", "effect": "この PC にだけ残る。"}, {"label": "クラウド", "effect": "ほかの PC からも読める。"}],
+        "recommend": "ローカル",
+        "reason": "外に出さない決まりのため。"
+    }]);
+    let r = sb.report(&report(decisions, json!([]), notes()));
+    let t = sb.transcript(&[edit(&sb.file("notes.md")), r]);
+    passed(&sb.stop(&t, "p1"));
+    let line = &stop_lines(&sb, 1)[0];
+    assert_eq!(line["report_title"], "設定の修正");
+    assert_eq!(line["decisions"], 1);
+    assert!(line["report_path"].as_str().unwrap().ends_with(".report-gate/task.report.json"), "{line}");
+    assert!(line["report_html"].as_str().unwrap().ends_with(".report-gate/task.html"), "{line}");
+}
+
+#[test]
+fn unchecked_stop_records_a_stop_without_a_report() {
+    let sb = Sandbox::new();
+    let t = sb.transcript(&[bash("ls"), bash("pwd")]);
+    assert_eq!(sb.stop(&t, "p1"), "");
+    let line = &stop_lines(&sb, 1)[0];
+    assert!(line.get("report_path").is_none() && line.get("decisions").is_none(), "{line}");
+}
+
+#[test]
+fn blocked_stops_record_nothing_and_giving_up_records_one_stop() {
+    let sb = Sandbox::new();
+    let mut body = report(json!([]), json!([]), notes());
+    body["conclusion"] = json!("");
+    let r = sb.report(&body);
+    let t = sb.transcript(&[edit(&sb.file("notes.md")), r]);
+    reason(&sb.stop(&t, "p1"));
+    reason(&sb.stop(&t, "p1"));
+    assert!(sb.events().is_empty(), "the agent keeps working after a block");
+    let third: Value = serde_json::from_str(&sb.stop(&t, "p1")).unwrap();
+    assert!(third.get("decision").is_none());
+    let line = &stop_lines(&sb, 1)[0];
+    assert_eq!(line["report_title"], "設定の修正");
+    assert_eq!(line["decisions"], 0);
+}
+
+#[test]
+fn off_mode_records_a_stop() {
+    let sb = Sandbox::new();
+    let t = sb.transcript(&[edit(&sb.file("notes.md"))]);
+    let input = json!({"session_id":"s1","transcript_path":t,"cwd":sb.cwd,"prompt_id":"p1","last_assistant_message":"直した。"});
+    assert_eq!(sb.run_raw(&input.to_string(), Some("off")), "");
+    assert!(sb.log_lines().is_empty());
+    let line = &stop_lines(&sb, 1)[0];
+    assert!(line.get("report_path").is_none(), "{line}");
+}
+
+#[test]
+fn failing_to_record_the_stop_does_not_change_the_verdict() {
+    // events.jsonl is a folder, so the append fails.
+    let sb = Sandbox::new();
+    fs::create_dir_all(sb.home.join(".local/share/agent-report-gate/events.jsonl")).unwrap();
+    passed(&sb.stop(&passing_transcript(&sb), "p1"));
+    assert_eq!(sb.log_lines()[0]["verdict"], "pass");
+
+    let sb = Sandbox::new();
+    fs::create_dir_all(sb.home.join(".local/share/agent-report-gate/events.jsonl")).unwrap();
+    let t = sb.transcript(&[edit(&sb.file("notes.md"))]);
+    assert!(reason(&sb.stop(&t, "p1")).contains("報告の JSON が書かれていない"));
+}
+
+#[test]
+fn real_stop_records_only_when_stopping_and_never_the_text() {
+    let marker = "MARKER-5d1c-本文";
+    let sb = Sandbox::new();
+    let mut body = report(json!([]), json!([]), notes());
+    body["conclusion"] = json!(format!("{marker}を直した。"));
+    let r = sb.report(&body);
+    let t = sb.transcript(&[edit(&sb.file("notes.md")), r]);
+    // The reply is too long, so the first two stops are sent back.
+    let long_reply = format!("{marker}{}", "あ".repeat(500));
+    reason(&sb.stop_with_reply(&t, &long_reply, "p1"));
+    reason(&sb.stop_with_reply(&t, &long_reply, "p1"));
+    assert!(sb.events().is_empty());
+    // Fixed reply: the gate lets the agent stop.
+    passed(&sb.stop_with_reply(&t, &format!("{marker}を直した。"), "p1"));
+    stop_lines(&sb, 1);
+    let text = fs::read_to_string(sb.home.join(".local/share/agent-report-gate/events.jsonl")).unwrap();
+    assert_eq!(text.matches(marker).count(), 0, "{text}");
+}
+
+#[test]
+fn stop_line_does_not_depend_on_fields_the_report_check_reads() {
+    // prompt_id has the wrong type, so the report check cannot read the input; the agent stops.
+    let sb = Sandbox::new();
+    let input = json!({"session_id": "s1", "cwd": sb.cwd, "prompt_id": 123, "transcript_path": "x"});
+    assert_eq!(sb.run_raw(&input.to_string(), None), "");
+    stop_lines(&sb, 1);
+
+    // No session id: there is no row to attach the stop to.
+    let sb = Sandbox::new();
+    let input = json!({"session_id": "", "cwd": sb.cwd, "transcript_path": "x"});
+    assert_eq!(sb.run_raw(&input.to_string(), None), "");
+    assert!(sb.events().is_empty());
+}
+
+#[test]
+fn stop_line_names_the_page_written_with_a_custom_suffix() {
+    let sb = Sandbox::new();
+    fs::write(
+        sb.home.join(".config/agent-report-gate/config.json"),
+        r#"{"edited_files_threshold": 1, "tool_call_threshold": 8, "ignore_path_patterns": ["/ignored/", ".report-gate/"], "report_suffix": ".rep.json"}"#,
+    )
+    .unwrap();
+    let p = sb.cwd.join(".report-gate/task.rep.json");
+    fs::create_dir_all(p.parent().unwrap()).unwrap();
+    fs::write(&p, report(json!([]), json!([]), notes()).to_string()).unwrap();
+    let write = json!({"type":"tool_use","name":"Write","input":{"file_path":p}});
+    let t = sb.transcript(&[edit(&sb.file("notes.md")), write]);
+    let out: Value = serde_json::from_str(&sb.stop(&t, "p1")).unwrap();
+    assert!(out.get("decision").is_none(), "{out}");
+    let line = &stop_lines(&sb, 1)[0];
+    let html = line["report_html"].as_str().unwrap();
+    assert!(html.ends_with(".report-gate/task.html"), "{line}");
+    assert!(Path::new(html).is_file());
+}
+
+#[test]
+fn stop_line_says_when_the_agent_waits_on_background_work() {
+    let sb = Sandbox::new();
+    let t = sb.transcript(&[json!({"type":"tool_use","id":"toolu_A","name":"Agent","input":{"description":"d","prompt":"p"}})]);
+    // The shape Claude Code writes for a subagent started in the background.
+    let launched = json!({"type":"user","promptId":"p1",
+        "message":{"content":[{"type":"tool_result","tool_use_id":"toolu_A","content":[{"type":"text","text":"x"}]}]},
+        "toolUseResult":{"agentId":"a1","isAsync":true,"status":"async_launched"}});
+    fs::write(&t, format!("{}{launched}\n", fs::read_to_string(&t).unwrap())).unwrap();
+    assert_eq!(sb.stop(&t, "p1"), "");
+    assert_eq!(stop_lines(&sb, 1)[0]["background"], true);
+
+    // The result came back in a later turn, so that turn's stop is an ordinary one.
+    let done = json!({"type":"queue-operation","operation":"enqueue",
+        "content":"<task-notification>\n<task-id>a1</task-id>\n<tool-use-id>toolu_A</tool-use-id>\n<status>completed</status>\n</task-notification>"});
+    fs::write(&t, format!("{}{done}\n", fs::read_to_string(&t).unwrap())).unwrap();
+    assert_eq!(sb.stop(&t, "p1"), "");
+    assert!(stop_lines(&sb, 2)[1].get("background").is_none());
+}
+
+#[test]
+fn stop_line_keeps_only_the_home_line_of_the_reply() {
+    let sb = Sandbox::new();
+    let t = sb.transcript(&[bash("ls")]);
+    let body = "BODY-91c2-本文は残さない";
+    assert_eq!(sb.stop_with_reply(&t, &format!("{body}\n\nHome: 要 レビューを待っている"), "p1"), "");
+    assert_eq!(sb.stop_with_reply(&t, &format!("{body}\nHome: 不要 テストの完了を報告"), "p1"), "");
+    // Missing or malformed: recorded as unknown, and the agent is not stopped for it.
+    assert_eq!(sb.stop_with_reply(&t, body, "p1"), "");
+    assert_eq!(sb.stop_with_reply(&t, &format!("Home: 要 {body}{}", "あ".repeat(60)), "p1"), "");
+    let lines = stop_lines(&sb, 4);
+    assert_eq!((lines[0]["attention"].as_str(), lines[0]["note"].as_str()), (Some("yes"), Some("レビューを待っている")));
+    assert_eq!((lines[1]["attention"].as_str(), lines[1]["note"].as_str()), (Some("no"), Some("テストの完了を報告")));
+    for l in &lines[2..] {
+        assert_eq!(l["attention"], "unknown", "{l}");
+        assert!(l.get("note").is_none(), "{l}");
+    }
+    let text = fs::read_to_string(sb.home.join(".local/share/agent-report-gate/events.jsonl")).unwrap();
+    assert_eq!(text.matches("BODY-91c2").count(), 0, "{text}");
+}
+
+#[test]
+fn home_line_is_taken_from_the_transcript_when_the_input_has_no_reply() {
+    let sb = Sandbox::new();
+    let t = sb.transcript(&[json!({"type":"text","text":"直した。\nHome: 不要 設定を直した"})]);
+    let input = json!({"session_id":"s1","transcript_path":t,"cwd":sb.cwd,"prompt_id":"p1"});
+    assert_eq!(sb.run_raw(&input.to_string(), Some("off")), "");
+    let line = &stop_lines(&sb, 1)[0];
+    assert_eq!((line["attention"].as_str(), line["note"].as_str()), (Some("no"), Some("設定を直した")));
+}
+
+#[test]
+fn goal_is_required_and_shown_on_the_page() {
+    let sb = Sandbox::new();
+    let mut body = report(json!([]), json!([]), notes());
+    body.as_object_mut().unwrap().remove("goal");
+    let r = sb.report(&body);
+    let t = sb.transcript(&[edit(&sb.file("notes.md")), r]);
+    assert!(reason(&sb.stop(&t, "p1")).contains("goal が空"));
+
+    let sb = Sandbox::new();
+    let r = sb.report(&report(json!([]), json!([]), notes()));
+    let t = sb.transcript(&[edit(&sb.file("notes.md")), r]);
+    passed(&sb.stop(&t, "p1"));
+    assert!(sb.page().contains("設定の誤りで止まる作業を、また動くようにしたい。"));
+}
+
+#[test]
+fn question_longer_than_the_limit_is_sent_back() {
+    let decision = |q: &str| {
+        json!([{"question": q, "options": [{"label": "A", "effect": "a"}, {"label": "B", "effect": "b"}], "recommend": "A", "reason": "r"}])
+    };
+    let sb = Sandbox::new();
+    let r = sb.report(&report(decision(&"あ".repeat(40)), json!([]), notes()));
+    let t = sb.transcript(&[edit(&sb.file("notes.md")), r]);
+    passed(&sb.stop(&t, "p1"));
+
+    let sb = Sandbox::new();
+    let r = sb.report(&report(decision(&"あ".repeat(41)), json!([]), notes()));
+    let t = sb.transcript(&[edit(&sb.file("notes.md")), r]);
+    let why = reason(&sb.stop(&t, "p1"));
+    assert!(why.contains("question が 41 字ある") && why.contains("40 字以内"), "{why}");
+}
+
+#[test]
+fn portal_is_off_by_default() {
+    let sb = Sandbox::new();
+    // A Maestri terminal whose config does not name a portal command.
+    fs::write(sb.home.join("in-maestri"), "").unwrap();
+    let r = sb.report(&report(json!([]), json!([]), notes()));
+    let t = sb.transcript(&[edit(&sb.file("notes.md")), r]);
+    passed(&sb.stop(&t, "p1"));
+    let line = &sb.log_lines()[0];
+    assert_eq!(line["verdict"], "pass");
+    assert!(line["error"].is_null(), "{line}");
 }

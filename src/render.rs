@@ -98,6 +98,7 @@ pub fn render(report: &Report, meta: &str, issues: &[String]) -> String {
         ("title", &esc(&report.title)),
         ("meta", &esc(meta)),
         ("warnings", &warnings),
+        ("goal", &esc(&report.goal)),
         ("conclusion", &esc(&report.conclusion)),
         ("decisions", &decisions),
         ("details", &details),

@@ -2,6 +2,7 @@
   "report_dir": ".report-gate",
   "report_suffix": ".report.json",
   "conclusion_max_chars": 200,
+  "question_max_chars": 40,
   "reply_max_chars": 400,
   "code_extensions": [
     "rs",
@@ -78,5 +79,6 @@
     "Terminal #",
     "報告の点検:"
   ],
-  "portal_command": "maestri"
+  "portal_command": "",
+  "home_port": 7878
 }

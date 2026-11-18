@@ -19,6 +19,8 @@ pub struct Config {
     pub report_dir: String,
     pub report_suffix: String,
     pub conclusion_max_chars: usize,
+    /// Upper bound of decisions[].question, so that it fits on a Home card.
+    pub question_max_chars: usize,
     pub reply_max_chars: usize,
     pub code_extensions: Vec<String>,
     pub ignore_path_patterns: Vec<String>,
@@ -33,8 +35,11 @@ pub struct Config {
     pub verification_rules: Vec<VerificationRule>,
     pub max_rounds: u32,
     pub agent_prompt_markers: Vec<String>,
-    /// Command whose `portal` subcommand shows the page inside Maestri. Empty turns this off.
+    /// Command whose `portal` subcommand shows the page inside Maestri. Empty (the default) turns
+    /// this off; the human opens the page from the report title on the Home page instead.
     pub portal_command: String,
+    /// Port of the Home page (`report-gate serve`), on 127.0.0.1.
+    pub home_port: u16,
 }
 
 impl Config {

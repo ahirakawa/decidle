@@ -11,6 +11,10 @@ const MAX_ROLE_BYTES: u64 = 1024 * 1024;
 #[derive(Deserialize)]
 pub struct Report {
     pub title: String,
+    /// What the human was trying to do with this work, in one sentence. Required; missing reads as
+    /// empty so that the check can say what to write instead of failing to parse.
+    #[serde(default)]
+    pub goal: String,
     pub conclusion: String,
     pub decisions: Vec<Decision>,
     pub verified: Vec<String>,
@@ -157,6 +161,9 @@ pub fn check_report(report: &Report, reply: &str, facts: &TurnFacts, cwd: &str, 
     if report.title.trim().is_empty() {
         issues.push("title が空。作業の名前を書く。".to_string());
     }
+    if report.goal.trim().is_empty() {
+        issues.push("goal が空。人がこの作業で何をしようとしていたかを 1 文で書く。".to_string());
+    }
     let conclusion_len = report.conclusion.trim().chars().count();
     if conclusion_len == 0 {
         issues.push("conclusion が空。何が起きたか、何を変えたかを書く。".to_string());
@@ -175,12 +182,19 @@ pub fn check_report(report: &Report, reply: &str, facts: &TurnFacts, cwd: &str, 
     }
 
     for (i, d) in report.decisions.iter().enumerate() {
-        let name = if d.question.trim().is_empty() {
+        let question_len = d.question.trim().chars().count();
+        let name = if question_len == 0 {
             issues.push(format!("decisions[{i}] の question が空。"));
             format!("decisions[{i}]")
         } else {
             format!("判断項目「{}」", clip(&d.question, 60))
         };
+        if question_len > cfg.question_max_chars {
+            issues.push(format!(
+                "{name}の question が {question_len} 字ある。Home のカードに出すので {} 字以内にし、背景は reason か options の effect に移す。",
+                cfg.question_max_chars
+            ));
+        }
         if d.options.len() < 2 {
             issues.push(format!("{name}の options が 2 つ未満。選べるものを全部書く。"));
         }

@@ -24,6 +24,8 @@
   main { max-width: 720px; margin: 0 auto; padding: 28px 20px 64px; }
   header { color: var(--muted); font-size: 13px; margin-bottom: 4px; }
   h1 { font-size: 15px; font-weight: 600; color: var(--muted); margin: 0 0 12px; }
+  .goal { color: var(--muted); margin: 0 0 10px; }
+  .goal::before { content: "やろうとしていたこと: "; }
   .conclusion { font-size: 19px; line-height: 1.7; margin: 0 0 28px; padding-left: 14px; border-left: 4px solid var(--accent); }
   h2 { font-size: 13px; font-weight: 600; color: var(--accent); margin: 0 0 10px; letter-spacing: .04em; }
   .none { color: var(--muted); margin: 0 0 28px; }
@@ -56,6 +58,7 @@
 <header>{{meta}}</header>
 <h1>{{title}}</h1>
 {{warnings}}
+<p class="goal">{{goal}}</p>
 <p class="conclusion">{{conclusion}}</p>
 <h2>決めてほしいこと</h2>
 {{decisions}}

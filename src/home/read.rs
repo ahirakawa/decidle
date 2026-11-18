@@ -1,0 +1,127 @@
+//! Reading events.jsonl with an in-memory DuckDB. No database file is created, so that the
+//! server never holds a lock that the hooks would collide with.
+
+use duckdb::Connection;
+use std::path::Path;
+
+use super::note::Attention;
+use super::state::{Kind, Event};
+
+/// The events in line order, and the number of lines that could not be read
+/// (cut off, not JSON, or missing ts, session_id or a known event).
+pub struct Loaded {
+    pub events: Vec<Event>,
+    pub skipped: usize,
+}
+
+const QUERY: &str = r#"
+WITH f AS (SELECT string_split(content, chr(10)) AS ls FROM read_text(?)),
+lines AS (SELECT unnest(generate_series(1, len(ls))) AS n, unnest(ls) AS line FROM f),
+parsed AS (
+    SELECT n, CASE WHEN json_valid(line) AND json_type(line) = 'OBJECT' THEN line::JSON END AS j
+    FROM lines WHERE trim(line) <> ''
+)
+SELECT
+    j->>'ts',
+    epoch_us(try_cast(j->>'ts' AS TIMESTAMPTZ)),
+    j->>'session_id',
+    j->>'cwd',
+    j->>'event',
+    try_cast(j->>'pid' AS BIGINT),
+    try_cast(j->>'pid_started' AS BIGINT),
+    j->>'report_path',
+    j->>'report_title',
+    try_cast(j->>'decisions' AS BIGINT),
+    j->>'resolves',
+    j->>'transcript_path',
+    j->>'report_html',
+    try_cast(j->>'background' AS BOOLEAN),
+    j->>'attention',
+    j->>'note'
+FROM parsed ORDER BY n
+"#;
+
+type Row = (
+    Option<String>,
+    Option<i64>,
+    Option<String>,
+    Option<String>,
+    Option<String>,
+    Option<i64>,
+    Option<i64>,
+    Option<String>,
+    Option<String>,
+    Option<i64>,
+    Option<String>,
+    Option<String>,
+    Option<String>,
+    Option<bool>,
+    Option<String>,
+    Option<String>,
+);
+
+fn to_event(r: Row) -> Option<Event> {
+    let (ts, ts_us, session_id, cwd, event, pid, pid_started, report_path, report_title, decisions, resolves, transcript_path, report_html, background, attention, note) = r;
+    Some(Event {
+        ts: ts?,
+        ts_us: ts_us?,
+        session_id: session_id.filter(|s| !s.is_empty())?,
+        cwd: cwd.unwrap_or_default(),
+        kind: Some(Kind::parse(event.as_deref()?)?),
+        pid,
+        pid_started,
+        transcript_path,
+        report_path,
+        report_html,
+        report_title,
+        decisions: decisions.unwrap_or(0),
+        resolves,
+        background: background.unwrap_or(false),
+        attention: Attention::parse(attention.as_deref().unwrap_or_default()),
+        note,
+    })
+}
+
+pub fn load(path: &Path) -> Result<Loaded, String> {
+    if !path.exists() {
+        return Ok(Loaded { events: Vec::new(), skipped: 0 });
+    }
+    let fail = |e: duckdb::Error| format!("DuckDB: {e}");
+    let conn = Connection::open_in_memory().map_err(fail)?;
+    // Nothing may be downloaded or spilled to disk.
+    conn.execute_batch(
+        "SET autoinstall_known_extensions = false; SET autoload_known_extensions = false; SET temp_directory = '';",
+    )
+    .map_err(fail)?;
+    let mut stmt = conn.prepare(QUERY).map_err(fail)?;
+    let rows = stmt
+        .query_map([path.to_string_lossy().as_ref()], |row| {
+            Ok((
+                row.get(0)?,
+                row.get(1)?,
+                row.get(2)?,
+                row.get(3)?,
+                row.get(4)?,
+                row.get(5)?,
+                row.get(6)?,
+                row.get(7)?,
+                row.get(8)?,
+                row.get(9)?,
+                row.get(10)?,
+                row.get(11)?,
+                row.get(12)?,
+                row.get(13)?,
+                row.get(14)?,
+                row.get(15)?,
+            ))
+        })
+        .map_err(fail)?;
+    let mut loaded = Loaded { events: Vec::new(), skipped: 0 };
+    for row in rows {
+        match to_event(row.map_err(fail)?) {
+            Some(ev) => loaded.events.push(ev),
+            None => loaded.skipped += 1,
+        }
+    }
+    Ok(loaded)
+}

@@ -9,6 +9,48 @@
           }
         ]
       }
+    ],
+    "SessionStart": [
+      {
+        "matcher": "startup|resume|clear|compact",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "b=\"$HOME/.local/bin/report-gate\"; [ -x \"$b\" ] || exit 0; exec \"$b\" event"
+          }
+        ]
+      }
+    ],
+    "UserPromptSubmit": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "b=\"$HOME/.local/bin/report-gate\"; [ -x \"$b\" ] || exit 0; exec \"$b\" event"
+          }
+        ]
+      }
+    ],
+    "Notification": [
+      {
+        "matcher": "permission_prompt",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "b=\"$HOME/.local/bin/report-gate\"; [ -x \"$b\" ] || exit 0; exec \"$b\" event"
+          }
+        ]
+      }
+    ],
+    "SessionEnd": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "b=\"$HOME/.local/bin/report-gate\"; [ -x \"$b\" ] || exit 0; exec \"$b\" event"
+          }
+        ]
+      }
     ]
   }
 }

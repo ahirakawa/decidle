@@ -9,6 +9,10 @@ use crate::check::{check_report, collect_facts, should_check, Report};
 use crate::config::Config;
 use crate::render::{file_url, render};
 use crate::transcript::{self, Kind};
+use report_gate::home::background;
+use report_gate::home::events::{self as home_events, StopInfo, StopReport};
+use report_gate::home::note;
+
 use crate::util::{append_line, clip, data_dir, now_iso, read_regular, write_atomic};
 
 const REPORT_FORMAT: &str = include_str!("../docs/report-format.md");
@@ -204,15 +208,81 @@ fn when_to_report(cfg: &Config) -> String {
 }
 
 /// Stop hook entry point. Any failure of the gate itself lets the agent stop.
-pub fn run_stop() {
-    if std::env::var("REPORT_GATE_MODE").is_ok_and(|m| m == "off") {
-        return;
+/// What the gate decided for this stop.
+enum Verdict {
+    /// The agent is told to fix the report and keeps working. Holds the JSON to print.
+    Block(String),
+    /// The agent stops, with the report the human will see (if any) and the JSON to print (if any).
+    Stop(Option<StopReport>, Option<String>),
+}
+
+/// Who stopped, for the Home page. Taken from the raw input on its own, so that a field the
+/// report check cannot read does not lose the stop line.
+struct StopTarget {
+    session_id: String,
+    cwd: String,
+    transcript_path: String,
+    last_assistant_message: String,
+}
+
+fn stop_target(raw: &str) -> Option<StopTarget> {
+    let v: serde_json::Value = serde_json::from_str(raw).ok()?;
+    let text = |k: &str| v.get(k).and_then(serde_json::Value::as_str).unwrap_or_default().to_string();
+    let session_id = text("session_id");
+    (!session_id.is_empty()).then(|| StopTarget {
+        session_id,
+        cwd: text("cwd"),
+        transcript_path: text("transcript_path"),
+        last_assistant_message: text("last_assistant_message"),
+    })
+}
+
+/// Records on the Home page that the agent stopped, and whether it still waits on background
+/// work. A failure here must not change the gate's decision or its output, so it only goes to
+/// stderr. A transcript that cannot be read records an ordinary stop.
+fn record_stop(target: &Option<StopTarget>, report: Option<&StopReport>) {
+    let Some(t) = target else { return };
+    let background = match background::pending(Path::new(&t.transcript_path)) {
+        Ok(p) => p.waiting(),
+        Err(e) => {
+            eprintln!("report-gate: 裏の作業を確かめるための会話記録を読めない: {e}");
+            false
+        }
+    };
+    let (attention, note) = note::parse(&last_reply(t));
+    let info = StopInfo { background, attention, note };
+    if let Err(e) = home_events::append_stop(&home_events::events_path(), &t.session_id, &t.cwd, report, &info) {
+        eprintln!("report-gate: events.jsonl に停止を書けない: {e}");
     }
+}
+
+/// The reply the agent ended the turn with: last_assistant_message, or else the last assistant
+/// text in the transcript. Only its `Home:` line is kept.
+fn last_reply(t: &StopTarget) -> String {
+    if !t.last_assistant_message.trim().is_empty() {
+        return t.last_assistant_message.clone();
+    }
+    transcript::load(Path::new(&t.transcript_path))
+        .ok()
+        .and_then(|entries| entries.into_iter().rev().find(|e| e.kind == Kind::Assistant && !e.text.is_empty()))
+        .map(|e| e.text)
+        .unwrap_or_default()
+}
+
+pub fn run_stop() {
     let mut raw = String::new();
     let _ = std::io::stdin().take(MAX_INPUT_BYTES).read_to_string(&mut raw);
+    let target = stop_target(&raw);
+    // Every way out of this function except a block lets the agent stop, so each records a stop,
+    // and records it before printing, so that a failed print cannot skip it.
+    if std::env::var("REPORT_GATE_MODE").is_ok_and(|m| m == "off") {
+        record_stop(&target, None);
+        return;
+    }
     let cfg = match Config::load() {
         Ok(c) => c,
         Err(e) => {
+            record_stop(&target, None);
             eprintln!("report-gate: {e}");
             return;
         }
@@ -221,17 +291,28 @@ pub fn run_stop() {
     let input: HookInput = match serde_json::from_str(&raw) {
         Ok(i) => i,
         Err(e) => {
+            record_stop(&target, None);
             log(&data_dir, "", "error", &[], 0, Some(&format!("hook input: {e}")));
             return;
         }
     };
     let session_id = input.session_id.clone().unwrap_or_default();
-    if let Err(e) = evaluate(&input, &cfg, &data_dir, &session_id) {
-        log(&data_dir, &session_id, "error", &[], 0, Some(&e));
+    match evaluate(&input, &cfg, &data_dir, &session_id) {
+        Ok(Verdict::Block(output)) => println!("{output}"),
+        Ok(Verdict::Stop(report, output)) => {
+            record_stop(&target, report.as_ref());
+            if let Some(output) = output {
+                println!("{output}");
+            }
+        }
+        Err(e) => {
+            record_stop(&target, None);
+            log(&data_dir, &session_id, "error", &[], 0, Some(&e));
+        }
     }
 }
 
-fn evaluate(input: &HookInput, cfg: &Config, data_dir: &Path, session_id: &str) -> Result<(), String> {
+fn evaluate(input: &HookInput, cfg: &Config, data_dir: &Path, session_id: &str) -> Result<Verdict, String> {
     let transcript_path = input.transcript_path.as_deref().ok_or("transcript_path がない")?;
     let entries = transcript::load(Path::new(transcript_path))
         .map_err(|e| format!("会話記録 {transcript_path} を読めない: {e}"))?;
@@ -240,7 +321,7 @@ fn evaluate(input: &HookInput, cfg: &Config, data_dir: &Path, session_id: &str) 
     let cwd = input.cwd.clone().unwrap_or_default();
     let facts = collect_facts(&entries, start, &cwd, cfg);
     if !should_check(&facts, cfg) {
-        return Ok(());
+        return Ok(Verdict::Stop(None, None));
     }
 
     let reply = match input.last_assistant_message.as_deref().map(str::trim) {
@@ -306,16 +387,17 @@ fn evaluate(input: &HookInput, cfg: &Config, data_dir: &Path, session_id: &str) 
             "報告が決まりに合っていない。次の点を直すこと。\n\n{list}\n\n{}\n\n{REPORT_FORMAT}",
             when_to_report(cfg)
         );
-        println!("{}", json!({ "decision": "block", "reason": reason }));
         log(data_dir, session_id, "block", &issues, state.rounds, None);
-        return Ok(());
+        return Ok(Verdict::Block(json!({ "decision": "block", "reason": reason }).to_string()));
     }
 
     // Passed, or the rejection limit was reached: show the human whatever page can be rendered.
     let mut portal_error = None;
+    let mut written_html = None;
     let mut message = match &loaded {
         Some((report, paths)) => {
             let html_path = write_page(report, paths, &issues)?;
+            written_html = Some(html_path.clone());
             portal_error = show_in_portal(&html_path, cfg);
             format!("report-gate: 報告のページ {}", file_url(&html_path))
         }
@@ -327,8 +409,13 @@ fn evaluate(input: &HookInput, cfg: &Config, data_dir: &Path, session_id: &str) 
         message.push_str(&format!("\n{}回差し戻しても次の点が残った。\n{list}", cfg.max_rounds));
         log(data_dir, session_id, "exhausted", &issues, state.rounds, portal_error.as_deref());
     }
-    println!("{}", json!({ "systemMessage": message }));
-    Ok(())
+    let report = loaded.zip(written_html).map(|((report, paths), html)| StopReport {
+        path: paths.json.to_string_lossy().into_owned(),
+        html,
+        title: clip(&report.title, 200),
+        decisions: report.decisions.len(),
+    });
+    Ok(Verdict::Stop(report, Some(json!({ "systemMessage": message }).to_string())))
 }
 
 fn save_state(path: &Path, state: &State) -> Result<(), String> {

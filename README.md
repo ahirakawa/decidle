@@ -20,7 +20,7 @@ Claude Code の Stop hook。エージェントに報告を JSON で書かせ、�
    ls ~/.claude/hooks/stop_report_gate.sh
    ```
 
-3. `~/.claude/settings.json` の `hooks.Stop` に、`docs/settings-snippet.json` の 1 項目を足す。
+3. `~/.claude/settings.json` の `hooks` に、`docs/settings-snippet.json` の項目を足す。Stop は報告の点検、それ以外の SessionStart、UserPromptSubmit、Notification、SessionEnd は Home ページの記録に使う。SessionStart の hook は、返事の最後に Home 用の一言を書く指示をエージェントの文脈に足す。
 
 4. Maestri を使うなら、Maestri のターミナルで、このフォルダからロールを登録する。
 
@@ -37,7 +37,8 @@ Claude Code の Stop hook。エージェントに報告を JSON で書かせ、�
 - 報告を求めるのは、編集したファイルが 3 個以上か、ツールの呼び出しが 20 回以上か、`maestri ask` を実行したターンだけ。数は設定の `edited_files_threshold` と `tool_call_threshold` で変えられる。
 - 字数の上限やコード扱いの拡張子は、`config.default.json` と同じ形のファイルを `~/.config/agent-report-gate/config.json` に置くと、書いたキーだけ上書きされる。
 - 報告の JSON とページは、作業したフォルダの `.report-gate/` にできる。git に入れたくなければ、各自の gitignore に足す。
-- Maestri のターミナルでは、ページを書いたあと、作業名の portal をキャンバスに出す。Maestro ではなく、ほかのエージェントとつながっているターミナルは、まとめ役が起動した作業ターミナルとみなして出さない。同じ名前の portal が残っていれば、そこに新しいページを表示する。出したくなければ、設定の `portal_command` を空にする。
+- 報告のページは、Home ページの行の題から開く。Home は `report-gate serve` で起動し、`http://127.0.0.1:7878/` で開く(ポートは設定の `home_port`)。仕様は `docs/spec-home.md` にある。
+- 報告ごとに Maestri の portal を出す機能は、既定で止めてある。戻すには、設定の `portal_command` を `"maestri"` にする。戻すと、Maestri のターミナルでは、ページを書いたあと作業名の portal をキャンバスに出す。まとめ役が起動した作業ターミナル(Maestro ではなく、ほかのエージェントとつながっているターミナル)では出さない。
 
 ## 修正依頼の回数を数える
 

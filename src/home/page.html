@@ -1,0 +1,272 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="report-gate-token" content="__TOKEN__">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Home</title>
+<style>
+  :root {
+    --bg: #f6f1e7; --panel: #fffdf8; --fg: #2a2520; --sub: #857b6e; --line: #e3dacb;
+    --decide: #b3261e; --permission: #c46a12; --need: #2b5d8a; --unknown: #8a6d1f; --noneed: #857b6e; --working: #4f7d4a; --background: #6c5b8e;
+    --cool: #e9e1d2; --cool-fg: #2a2520; --warm: #f0b44c; --warm-fg: #3b2600; --hot: #b3261e; --hot-fg: #fff;
+    color-scheme: light;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --bg: #101626; --panel: #182035; --fg: #eef0f6; --sub: #8f98b0; --line: #273250;
+      --decide: #ff7a70; --permission: #ffb15e; --need: #7fb4ea; --unknown: #e6c95c; --noneed: #8f98b0; --working: #8fd08a; --background: #b9a6e8;
+      --cool: #222c47; --cool-fg: #eef0f6; --warm: #e2a23a; --warm-fg: #1d1300; --hot: #e5483d; --hot-fg: #fff;
+      color-scheme: dark;
+    }
+  }
+  :root[data-theme="dark"] {
+    --bg: #101626; --panel: #182035; --fg: #eef0f6; --sub: #8f98b0; --line: #273250;
+    --decide: #ff7a70; --permission: #ffb15e; --need: #7fb4ea; --unknown: #e6c95c; --noneed: #8f98b0; --working: #8fd08a; --background: #b9a6e8;
+    --cool: #222c47; --cool-fg: #eef0f6; --warm: #e2a23a; --warm-fg: #1d1300; --hot: #e5483d; --hot-fg: #fff;
+    color-scheme: dark;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--fg); font: 14px/1.5 "Hiragino Sans", -apple-system, sans-serif; }
+  .wrap { max-width: 760px; margin: 0 auto; padding: 14px 12px 20px; }
+  header { display: flex; align-items: center; justify-content: space-between; }
+  .brand { font-size: 12px; letter-spacing: .15em; color: var(--sub); }
+  .theme { font: inherit; font-size: 12px; background: none; border: 1px solid var(--line); color: var(--sub); border-radius: 4px; padding: 2px 8px; cursor: pointer; }
+  .hero { margin: 10px 0 16px; padding: 14px 16px; background: var(--panel); border: 1px solid var(--line); border-radius: 6px; }
+  .hero .big { font-family: "Hiragino Mincho ProN", "Yu Mincho", serif; font-size: 22px; font-weight: 700; line-height: 1.3; }
+  .hero .big b { font-size: 44px; font-variant-numeric: tabular-nums; margin-right: 4px; vertical-align: -4px; }
+  .hero .sub { color: var(--sub); font-size: 13px; margin-top: 4px; }
+  .hero .sub span[data-since] { color: var(--fg); font-weight: 700; }
+  h2 { font-family: "Hiragino Mincho ProN", "Yu Mincho", serif; font-size: 15px; margin: 18px 0 8px; padding-bottom: 4px; border-bottom: 2px solid var(--fg); display: flex; justify-content: space-between; }
+  h2.thin { border-bottom-width: 1px; color: var(--sub); }
+  h2 small { font-family: "Hiragino Sans", sans-serif; font-weight: 400; color: var(--sub); font-size: 12px; }
+  .item { display: grid; grid-template-columns: 92px 1fr; background: var(--panel); border: 1px solid var(--line); border-radius: 6px; margin-bottom: 10px; overflow: hidden; position: relative; }
+  .num { display: flex; flex-direction: column; align-items: center; justify-content: center; padding: 10px 4px; background: var(--cool); color: var(--cool-fg); font-variant-numeric: tabular-nums; }
+  .num[data-lv="warm"] { background: var(--warm); color: var(--warm-fg); }
+  .num[data-lv="hot"] { background: var(--hot); color: var(--hot-fg); }
+  .num .v { font-size: 40px; font-weight: 800; line-height: 1; letter-spacing: -.03em; }
+  .num .u { font-size: 12px; margin-top: 4px; }
+  .num .cap { font-size: 10px; opacity: .8; margin-top: 2px; }
+  .body { padding: 10px 12px 12px; min-width: 0; }
+  .state { display: inline-block; font-size: 12px; font-weight: 700; color: var(--c); border: 1.5px solid var(--c); border-radius: 3px; padding: 0 6px; }
+  .unknown .state { border-style: dashed; }
+  .decide { --c: var(--decide); } .permission { --c: var(--permission); } .need { --c: var(--need); } .unknown { --c: var(--unknown); }
+  .noneed { --c: var(--noneed); } .working { --c: var(--working); } .background { --c: var(--background); }
+  .folder { font-size: 18px; font-weight: 700; margin-top: 4px; word-break: break-all; padding-right: 70px; }
+  .meta { font-size: 12px; color: var(--sub); font-variant-numeric: tabular-nums; }
+  .meta .dup { color: var(--fg); font-weight: 700; }
+  .say { margin-top: 8px; font-size: 17px; font-weight: 700; line-height: 1.4; padding-left: 10px; border-left: 3px solid var(--c); word-break: break-word; }
+  .say.missing { font-size: 13px; font-weight: 400; color: var(--sub); border-left-style: dashed; border-left-color: var(--unknown); }
+  .decs { margin-top: 8px; font-size: 15px; font-weight: 700; color: var(--decide); }
+  .report { margin-top: 8px; padding: 8px 10px; background: var(--bg); border-radius: 4px; font-size: 13px; word-break: break-word; }
+  .report a { color: var(--fg); font-weight: 600; }
+  .resolve { display: block; width: 100%; margin-top: 10px; font: inherit; font-size: 15px; font-weight: 700; padding: 9px; border-radius: 4px; border: none; background: var(--fg); color: var(--panel); cursor: pointer; }
+  .resolve:hover { opacity: .88; }
+  .kill { position: absolute; top: 8px; right: 8px; font: inherit; font-size: 11px; color: var(--hot); background: var(--panel); border: 1px solid var(--hot); border-radius: 3px; padding: 1px 7px; cursor: pointer; }
+  .kill:hover { background: var(--hot); color: var(--hot-fg); }
+  .quiet { grid-template-columns: 72px 1fr; background: transparent; }
+  .quiet .num .cap { white-space: nowrap; font-size: 9px; }
+  .quiet .num { background: transparent; color: var(--sub); border-right: 1px solid var(--line); }
+  .quiet .num .v { font-size: 24px; }
+  .quiet .folder { font-size: 15px; }
+  .quiet .say { font-size: 14px; font-weight: 400; }
+  .quiet .resolve { background: transparent; color: var(--fg); border: 1.5px solid var(--fg); padding: 6px; font-size: 13px; }
+  .line { display: grid; grid-template-columns: 92px 1fr auto; align-items: baseline; gap: 0 10px; padding: 8px 4px; border-bottom: 1px solid var(--line); }
+  .line .st { font-size: 12px; font-weight: 700; color: var(--c); }
+  .line .f { font-weight: 700; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .line .a { font-size: 12px; color: var(--sub); font-variant-numeric: tabular-nums; }
+  .line .meta, .line .r { grid-column: 2 / 4; }
+  .line .r { font-size: 13px; word-break: break-word; }
+  .line .r a { color: var(--fg); }
+  @media (min-width: 1100px) {
+    .wrap { max-width: 1400px; }
+    .cols { display: grid; grid-template-columns: 3fr 2fr; gap: 24px; align-items: start; }
+  }
+  .empty { color: var(--sub); padding: 12px 4px; }
+  #err { color: var(--decide); margin-top: 10px; }
+  footer { margin-top: 18px; color: var(--sub); font-size: 12px; display: flex; flex-wrap: wrap; gap: 4px 14px; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header><span class="brand">REPORT-GATE HOME</span><button class="theme" id="theme"></button></header>
+  <div id="err" hidden></div>
+  <div class="hero" id="hero"></div>
+  <div class="cols" id="main"></div>
+  <footer id="foot"></footer>
+</div>
+<script>
+"use strict";
+const TOKEN = document.querySelector('meta[name="report-gate-token"]').content;
+// The kind of a row. A stopped row splits by attention: need (yes), noneed (no), unknown.
+const kind = s => s.state === "stopped" ? ({ yes: "need", no: "noneed" })[s.attention] || "unknown" : s.state;
+const LABEL = {
+  decide: "決めてほしいことあり", permission: "許可待ち", need: "止まっている・対応が要", unknown: "止まっている・要否不明",
+  noneed: "止まっている・対応は不要", working: "作業中", background: "裏で作業中",
+};
+const MISSING = "要否不明: 返事の最後に「Home: 要/不要 …」の一言がない、または形に合わない";
+// Resolve and kill are offered on stopped rows only. A background row gets no buttons
+// (the server also refuses both with 409).
+const canClose = s => s.state === "decide" || s.state === "stopped";
+let sessions = [];
+
+const since = s => Date.parse(s.last_ts);
+function elapsed(t) {
+  const s = Math.max(0, Math.floor((Date.now() - t) / 1000));
+  if (s < 60) return s + "秒";
+  if (s < 3600) return Math.floor(s / 60) + "分";
+  return Math.floor(s / 3600) + "時間" + Math.floor(s % 3600 / 60) + "分";
+}
+function split(t) {
+  const sec = Math.max(0, Math.floor((Date.now() - t) / 1000)), m = Math.floor(sec / 60);
+  if (m < 1) return [String(sec), "秒"];
+  if (m < 60) return [String(m), "分"];
+  return [Math.floor(m / 60) + ":" + String(m % 60).padStart(2, "0"), "時間"];
+}
+const level = t => { const m = (Date.now() - t) / 60000; return m >= 20 ? "hot" : m >= 5 ? "warm" : "cool"; };
+
+function h(tag, attrs, ...kids) {
+  const el = document.createElement(tag);
+  for (const [k, v] of Object.entries(attrs || {})) {
+    if (k === "class") el.className = v;
+    else if (k.startsWith("on")) el.addEventListener(k.slice(2), v);
+    else if (k === "data") Object.assign(el.dataset, v);
+    else el.setAttribute(k, v);
+  }
+  for (const k of kids.flat()) if (k != null && k !== false) el.append(k);
+  return el;
+}
+
+async function post(path, s) {
+  try {
+    const res = await fetch(path, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "X-Report-Gate-Token": TOKEN },
+      body: JSON.stringify({ session_id: s.session_id, resolves: s.last_stop }),
+    });
+    const body = await res.json().catch(() => ({}));
+    if (!res.ok) alert(body.error || ("失敗: " + res.status));
+  } catch (e) {
+    alert("送れない: " + e.message);
+  }
+  refresh();
+}
+function kill(s) {
+  if (confirm(s.folder + "(#" + s.session_id.slice(0, 8) + ")の claude を終了する。よいか。")) post("/api/kill", s);
+}
+
+const THEMES = ["auto", "light", "dark"], TLABEL = { auto: "画面: 自動", light: "画面: 明るい", dark: "画面: 暗い" };
+let theme = "auto";
+try { theme = localStorage.getItem("home-theme") || "auto"; } catch (_) {}
+if (!THEMES.includes(theme)) theme = "auto";
+function applyTheme() {
+  if (theme === "auto") delete document.documentElement.dataset.theme; else document.documentElement.dataset.theme = theme;
+  document.getElementById("theme").textContent = TLABEL[theme];
+}
+document.getElementById("theme").addEventListener("click", () => {
+  theme = THEMES[(THEMES.indexOf(theme) + 1) % 3];
+  try { localStorage.setItem("home-theme", theme); } catch (_) {}
+  applyTheme();
+});
+
+function tick() {
+  document.querySelectorAll("[data-since]").forEach(el => { el.textContent = elapsed(+el.dataset.since); });
+  document.querySelectorAll(".num").forEach(el => {
+    const t = +el.dataset.from, [v, u] = split(t);
+    if (!el.closest(".quiet")) el.dataset.lv = level(t);
+    el.querySelector(".v").textContent = v;
+    el.querySelector(".u").textContent = u;
+  });
+  const n = sessions.filter(s => s.waits_for_human).length;
+  document.title = (n ? "(" + n + ") " : "") + "Home";
+}
+
+function meta(s) {
+  const dup = sessions.filter(x => x.folder === s.folder).length > 1;
+  return h("div", { class: "meta" }, h("span", { class: dup ? "dup" : "" }, "#" + s.session_id.slice(0, 8)));
+}
+function say(s) {
+  if (s.state === "permission") return h("div", { class: "say" }, "ターミナルで許可を出してほしい");
+  if (s.note) return h("div", { class: "say" }, s.note);
+  if (canClose(s)) return h("div", { class: "say missing" }, MISSING);
+  return null;
+}
+function reportLink(s) {
+  return s.report_url ? h("a", { href: s.report_url, title: "報告のページを開く" }, s.report_title) : s.report_title;
+}
+function item(s) {
+  const quiet = !s.waits_for_human;
+  return h("div", { class: "item " + kind(s) + (quiet ? " quiet" : "") },
+    h("div", { class: "num", data: { from: since(s) } },
+      h("span", { class: "v" }), h("span", { class: "u" }), h("span", { class: "cap" }, quiet ? "止まってから" : "待たせている")),
+    h("div", { class: "body" },
+      h("span", { class: "state" }, LABEL[kind(s)] || s.state),
+      h("div", { class: "folder", title: s.cwd }, s.folder),
+      meta(s),
+      say(s),
+      s.report_title && s.decisions > 0 ? h("div", { class: "decs" }, "決めてほしいこと " + s.decisions + " 件") : null,
+      s.report_title ? h("div", { class: "report" }, "報告: ", reportLink(s)) : null,
+      canClose(s) ? h("button", { class: "resolve", onclick: () => post("/api/resolve", s) }, quiet ? "解決" : "見た・解決") : null),
+    canClose(s) ? h("button", { class: "kill", onclick: () => kill(s) }, "終了…") : null);
+}
+function line(s) {
+  return h("div", { class: "line " + kind(s) },
+    h("span", { class: "st" }, LABEL[kind(s)] || s.state),
+    h("span", { class: "f", title: s.cwd }, s.folder),
+    h("span", { class: "a" }, h("span", { data: { since: since(s) } }), "前に更新"),
+    meta(s),
+    s.note ? h("div", { class: "r" }, s.note) : null,
+    s.report_title ? h("div", { class: "r" }, "前回: ", reportLink(s)) : null);
+}
+
+function render(data) {
+  // The server sorts the rows: those that wait for a human first, newest first within a rank.
+  sessions = data.sessions;
+  const wait = sessions.filter(s => s.waits_for_human);
+  const done = sessions.filter(s => !s.waits_for_human && canClose(s));
+  const busy = sessions.filter(s => !s.waits_for_human && !canClose(s));
+  const oldest = wait.length ? Math.min(...wait.map(since)) : null;
+  const decs = wait.reduce((n, s) => n + (s.report_title ? s.decisions : 0), 0);
+  document.getElementById("hero").replaceChildren(
+    wait.length
+      ? h("div", { class: "big" }, h("b", {}, String(wait.length)), "件があなたを待っている")
+      : h("div", { class: "big" }, sessions.length ? "待っているセッションはない" : "表に出すセッションはない"),
+    h("div", { class: "sub" },
+      wait.length ? ["いちばん長い待ち ", h("span", { data: { since: oldest } }), " ・ 決めてほしいこと 合計 " + decs + " 件 ・ "] : null,
+      "対応は不要の停止 " + done.length + " 件"));
+  document.getElementById("main").replaceChildren(
+    h("section", {},
+      h("h2", {}, "人を待っている", h("small", {}, wait.length + " 件")),
+      wait.length ? wait.map(item) : h("div", { class: "empty" }, "なし"),
+      h("h2", { class: "thin" }, "止まっている・対応は不要", h("small", {}, done.length + " 件")),
+      done.length ? done.map(item) : h("div", { class: "empty" }, "なし")),
+    h("section", {},
+      h("h2", {}, "作業中", h("small", {}, busy.length + " 件")),
+      busy.length ? busy.map(line) : h("div", { class: "empty" }, "なし")));
+  document.getElementById("foot").replaceChildren(
+    data.skipped > 0 ? h("span", {}, "読めなかった行: " + data.skipped + " 件") : "",
+    h("span", {}, "5秒ごとに取り直す"));
+  tick();
+}
+
+async function refresh() {
+  const err = document.getElementById("err");
+  try {
+    const res = await fetch("/api/sessions", { cache: "no-store" });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || res.status);
+    render(data);
+    err.hidden = true;
+  } catch (e) {
+    err.textContent = "取得できない: " + e.message;
+    err.hidden = false;
+  }
+}
+
+applyTheme();
+refresh();
+setInterval(refresh, 5000);
+setInterval(tick, 1000);
+</script>
+</body>
+</html>

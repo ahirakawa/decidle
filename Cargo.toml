@@ -6,3 +6,10 @@ edition = "2021"
 [dependencies]
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
+duckdb = { version = "1.20000.2", features = ["bundled", "json"] }
+libc = "0.2.191"
+
+# DuckDB's C++ is slow to start when unoptimized (about 0.5 s per hook call in a debug build),
+# which makes the 10000-call test take over ten minutes.
+[profile.dev.package.libduckdb-sys]
+opt-level = 3
