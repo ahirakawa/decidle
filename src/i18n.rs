@@ -109,6 +109,8 @@ const JA: &[(&str, &str)] = &[
     // Stop hook (src/gate.rs).
     ("gate.block_prefix", "報告が決まりに合っていない"),
     ("gate.block", "報告が決まりに合っていない。次の点を直すこと。\n\n{list}\n\n{when}\n\n{format}"),
+    // PostToolUse hint (src/hint.rs).
+    ("hint.needed", "このターンは報告の条件を超えたので、止まる前に報告の JSON を書くこと。書かずに止まると、Stop hook が差し戻す。\n\n{when}\n\n{format}"),
     ("gate.when", "報告を書くのは、次のどれかに当たるターンだけにする。当たらないターンでは、人間に頼まれないかぎり報告の JSON を書かない。"),
     ("gate.when_files", "- 編集したファイルが {n} 個以上ある。"),
     ("gate.when_tools", "- ツールの呼び出しが {n} 回以上ある。"),
@@ -210,6 +212,7 @@ End every reply with one line for the Home page: \"Home: yes <note>\" or \"Home:
     ("review_marker", "Report review:"),
     ("gate.block_prefix", "The report does not follow the rules"),
     ("gate.block", "The report does not follow the rules. Fix these points.\n\n{list}\n\n{when}\n\n{format}"),
+    ("hint.needed", "This turn has met the report conditions, so write the report JSON before you stop. If you stop without it, the Stop hook sends you back.\n\n{when}\n\n{format}"),
     ("gate.when", "Write a report only for a turn that meets one of these. In other turns, do not write the report JSON unless the human asks for it."),
     ("gate.when_files", "- It edited {n} or more files."),
     ("gate.when_tools", "- It made {n} or more tool calls."),

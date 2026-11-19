@@ -17,7 +17,7 @@ use decidle::i18n::{self, f, t, Lang};
 use crate::util::{append_line, clip, data_dir, now_iso, read_regular, write_atomic};
 
 /// How to write a report, given to the agent with every rejection. One file per language.
-fn report_format(lang: Lang) -> &'static str {
+pub(crate) fn report_format(lang: Lang) -> &'static str {
     match lang {
         Lang::Ja => include_str!("../docs/report-format.ja.md"),
         Lang::En => include_str!("../docs/report-format.en.md"),
@@ -205,7 +205,7 @@ fn show_in_portal(html_path: &str, cfg: &Config) -> Option<String> {
 }
 
 /// Tells the agent which turns need a report, so that it stops writing one after every small task.
-fn when_to_report(cfg: &Config) -> String {
+pub(crate) fn when_to_report(cfg: &Config) -> String {
     let mut lines = vec![
         t(cfg.language, "gate.when").to_string(),
         f(cfg.language, "gate.when_files", &[("n", &cfg.edited_files_threshold.to_string())]),
@@ -215,6 +215,12 @@ fn when_to_report(cfg: &Config) -> String {
         lines.push(f(cfg.language, "gate.when_command", &[("command", command)]));
     }
     lines.join("\n")
+}
+
+/// The key of a turn: the prompt id (Codex: turn id), or the uuid of the turn's first entry.
+/// Shared with the PostToolUse hint, so that both see the same turns.
+pub(crate) fn turn_key(turn: Option<&str>, entries: &[transcript::Entry], start: usize) -> String {
+    turn.map(str::to_string).unwrap_or_else(|| entries[start].uuid.clone())
 }
 
 /// Stop hook entry point. Any failure of the gate itself lets the agent stop.
@@ -363,7 +369,7 @@ fn evaluate(input: &HookInput, cfg: &Config, data_dir: &Path, session_id: &str) 
     // Issue text can quote the report, so strip anything that could forge terminal output.
     let issues: Vec<String> = issues.iter().map(|i| clip(i, 300)).collect();
 
-    let turn_key = turn.map(str::to_string).unwrap_or_else(|| entries[start].uuid.clone());
+    let turn_key = turn_key(turn, &entries, start);
     let path = state_path(data_dir, session_id);
     // Only a missing state file means "no rejections yet". Any other failure must not reset the count.
     let mut state: State = match read_regular(&path, MAX_INPUT_BYTES) {

@@ -2,6 +2,7 @@ mod check;
 mod config;
 mod extract;
 mod gate;
+mod hint;
 mod render;
 mod transcript;
 mod util;
@@ -14,6 +15,10 @@ fn main() {
     let code = match args.get(1).map(String::as_str) {
         Some("stop") => {
             gate::run_stop();
+            0
+        }
+        Some("hint") => {
+            hint::run();
             0
         }
         Some("extract") => extract::run(&args[2..]),
@@ -39,7 +44,7 @@ fn main() {
         },
         Some("clean") => clean(&args[2..]),
         _ => {
-            eprintln!("usage: decidle stop | decidle render <report.json> | decidle extract [--projects-dir DIR] | decidle event | decidle serve | decidle clean [--dry-run]");
+            eprintln!("usage: decidle stop | decidle hint | decidle render <report.json> | decidle extract [--projects-dir DIR] | decidle event | decidle serve | decidle clean [--dry-run]");
             1
         }
     };
