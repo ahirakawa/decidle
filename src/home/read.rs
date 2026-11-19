@@ -5,7 +5,7 @@ use duckdb::Connection;
 use std::path::Path;
 
 use super::note::Attention;
-use super::state::{Kind, Event};
+use super::state::{Event, Kind, Question};
 
 /// The events in line order, and the number of lines that could not be read
 /// (cut off, not JSON, or missing ts, session_id or a known event).
@@ -44,7 +44,8 @@ SELECT
     CASE WHEN json_type(j->'recommends') = 'ARRAY' THEN CAST(j->'recommends' AS VARCHAR) END,
     j->>'term',
     j->>'term_id',
-    j->>'term_ws'
+    j->>'term_ws',
+    CASE WHEN json_type(j->'ask') = 'ARRAY' THEN CAST(j->'ask' AS VARCHAR) END
 FROM parsed ORDER BY n
 "#;
 
@@ -72,17 +73,19 @@ type Row = (
     Option<String>,
     Option<String>,
     Option<String>,
+    Option<String>,
 );
 
 fn to_event(r: Row) -> Option<Event> {
-    let (ts, ts_us, session_id, cwd, event, pid, pid_started, report_path, report_title, decisions, resolves, transcript_path, report_html, background, attention, note, questions, report_goal, agent, recommends, term, term_id, term_ws) = r;
+    let (ts, ts_us, session_id, cwd, event, pid, pid_started, report_path, report_title, decisions, resolves, transcript_path, report_html, background, attention, note, questions, report_goal, agent, recommends, term, term_id, term_ws, ask) = r;
+    let kind = Kind::parse(event.as_deref()?)?;
     let (term, term_id, term_ws) = super::term::checked(term, term_id, term_ws);
     Some(Event {
         ts: ts?,
         ts_us: ts_us?,
         session_id: session_id.filter(|s| !s.is_empty())?,
         cwd: cwd.unwrap_or_default(),
-        kind: Some(Kind::parse(event.as_deref()?)?),
+        kind: Some(kind),
         pid,
         pid_started,
         transcript_path,
@@ -101,7 +104,34 @@ fn to_event(r: Row) -> Option<Event> {
         term,
         term_id,
         term_ws,
+        // Only an ask line carries questions.
+        ask: if kind == Kind::Ask { ask.as_deref().map(parse_ask).unwrap_or_default() } else { Vec::new() },
     })
+}
+
+/// The `ask` array of an ask line. An entry that is not an object is dropped; a field of the
+/// wrong type reads as empty, and so does an option that is not a string.
+fn parse_ask(text: &str) -> Vec<Question> {
+    let Ok(entries) = serde_json::from_str::<Vec<serde_json::Value>>(text) else {
+        return Vec::new();
+    };
+    entries
+        .iter()
+        .filter_map(serde_json::Value::as_object)
+        .map(|q| {
+            let text = |key: &str| q.get(key).and_then(serde_json::Value::as_str).unwrap_or_default().to_string();
+            Question {
+                question: text("question"),
+                header: text("header"),
+                options: q
+                    .get("options")
+                    .and_then(serde_json::Value::as_array)
+                    .map(|o| o.iter().map(|l| l.as_str().unwrap_or_default().to_string()).collect())
+                    .unwrap_or_default(),
+                multi: q.get("multi").and_then(serde_json::Value::as_bool).unwrap_or(false),
+            }
+        })
+        .collect()
 }
 
 /// The `questions` array of a stop line. Entries that are not strings are dropped.
@@ -159,6 +189,7 @@ pub fn load(path: &Path) -> Result<Loaded, String> {
                 row.get(20)?,
                 row.get(21)?,
                 row.get(22)?,
+                row.get(23)?,
             ))
         })
         .map_err(fail)?;

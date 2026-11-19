@@ -266,6 +266,63 @@ struct HookInput {
     message: Option<String>,
     /// Codex only; see agent.rs.
     turn_id: Option<String>,
+    /// PreToolUse and PostToolUse.
+    tool_name: Option<String>,
+    /// Read only for AskUserQuestion on PreToolUse, and then only the questions. The answers
+    /// (PostToolUse) are never copied.
+    tool_input: Option<Value>,
+}
+
+const ASK_TOOL: &str = "AskUserQuestion";
+const ASK_MAX_QUESTIONS: usize = 4;
+const ASK_MAX_OPTIONS: usize = 8;
+const ASK_QUESTION_MAX_CHARS: usize = 200;
+const ASK_HEADER_MAX_CHARS: usize = 40;
+const ASK_OPTION_MAX_CHARS: usize = 80;
+
+/// The same as `clip` in src/util.rs, which the library cannot reach: line breaks and other
+/// control characters become spaces, bidi overrides are dropped, and the text is cut.
+fn clip(text: &str, max_chars: usize) -> String {
+    let clean: String = text
+        .chars()
+        .filter(|c| !matches!(*c, '\u{202A}'..='\u{202E}' | '\u{2066}'..='\u{2069}'))
+        .map(|c| if c.is_control() { ' ' } else { c })
+        .collect();
+    if clean.chars().count() <= max_chars {
+        clean
+    } else {
+        format!("{}…", clean.chars().take(max_chars).collect::<String>())
+    }
+}
+
+/// The `ask` array of an ask line from the tool input of AskUserQuestion: the first four
+/// questions, each with its first eight option labels. Descriptions are not copied.
+fn ask_questions(tool_input: Option<&Value>) -> Value {
+    let questions = tool_input.and_then(|t| t.get("questions")).and_then(Value::as_array);
+    let text = |v: &Value, key: &str, max: usize| clip(v.get(key).and_then(Value::as_str).unwrap_or_default(), max);
+    let list: Vec<Value> = questions
+        .into_iter()
+        .flatten()
+        .filter(|q| q.is_object())
+        .take(ASK_MAX_QUESTIONS)
+        .map(|q| {
+            let options: Vec<String> = q
+                .get("options")
+                .and_then(Value::as_array)
+                .into_iter()
+                .flatten()
+                .take(ASK_MAX_OPTIONS)
+                .map(|o| text(o, "label", ASK_OPTION_MAX_CHARS))
+                .collect();
+            json!({
+                "question": text(q, "question", ASK_QUESTION_MAX_CHARS),
+                "header": text(q, "header", ASK_HEADER_MAX_CHARS),
+                "options": options,
+                "multi": q.get("multiSelect").and_then(Value::as_bool) == Some(true),
+            })
+        })
+        .collect();
+    Value::Array(list)
 }
 
 fn is_permission(input: &HookInput) -> bool {
@@ -290,9 +347,14 @@ fn line_for(input: &HookInput) -> Option<Map<String, Value>> {
         // Codex: the turn was interrupted, also when the human denied an approval. No Stop follows.
         "Interrupt" => "interrupt",
         "SessionEnd" => "end",
+        "PreToolUse" if input.tool_name.as_deref() == Some(ASK_TOOL) => "ask",
+        "PostToolUse" if input.tool_name.as_deref() == Some(ASK_TOOL) => "asked",
         _ => return None,
     };
     let mut m = base(session_id, cwd, event);
+    if event == "ask" {
+        m.insert("ask".into(), ask_questions(input.tool_input.as_ref()));
+    }
     if event == "start" {
         let agent = agent::detect(&json!({"transcript_path": input.transcript_path, "turn_id": input.turn_id}));
         m.insert("agent".into(), json!(agent.as_str()));

@@ -17,7 +17,7 @@
   body::before { content: ""; position: fixed; inset: 0; pointer-events: none; background-image: radial-gradient(currentColor 1.3px, transparent 1.5px); background-size: 9px 9px; opacity: .13;
     -webkit-mask-image: linear-gradient(200deg, #000, transparent 46%); mask-image: linear-gradient(200deg, #000, transparent 46%); }
   [data-skin="naname"]::after { content: ""; position: fixed; inset: 0; pointer-events: none; background: repeating-linear-gradient(0deg, #ffffff0d 0 1px, transparent 1px 3px); }
-  .k-decide { --c: var(--decide); } .k-permission { --c: var(--permission); } .k-need { --c: var(--need); }
+  .k-decide { --c: var(--decide); } .k-permission, .k-ask { --c: var(--permission); } .k-need { --c: var(--need); }
 
   header { position: relative; height: 232px; overflow: hidden; }
   .big { position: absolute; font-family: var(--num); font-weight: 900; line-height: 1; letter-spacing: -.045em; }
@@ -132,6 +132,11 @@
   .sheet .rec { display: block; font: 600 12.5px/1.5 var(--jp); opacity: .85; }
   .sheet .send { margin-top: 10px; padding: 6px 10px; border: 1.5px dashed currentColor; font-size: 12px; line-height: 1.6; opacity: .9; }
   .sheet .send b { display: block; font-size: 10.5px; letter-spacing: .08em; }
+  .sheet .askq { margin: 0 0 12px; } .sheet .askq:last-child { margin-bottom: 0; }
+  .sheet .askq b { display: block; font-size: 11px; letter-spacing: .08em; opacity: .75; } .sheet .askq b small { font: inherit; margin-left: 8px; }
+  .sheet .opts { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 6px; }
+  .sheet .opts span { border: 1.5px solid currentColor; padding: 1px 9px; font: 700 12.5px/1.5 var(--jp); overflow-wrap: anywhere; }
+  .sheet .say .askq { overflow-wrap: anywhere; }
   a.cmd { text-decoration: none; display: inline-block; }
   .k-unknown { --c: var(--permission); } .k-noneed { --c: currentColor; }
   .work span small { font: inherit; opacity: .7; margin-left: 6px; }
@@ -178,8 +183,8 @@ const TOKEN = document.querySelector('meta[name="decidle-token"]').content;
 const BOOT = document.querySelector('meta[name="decidle-boot"]').content;
 // The kind of a row. A stopped row splits by attention: need (yes), noneed (no), unknown.
 const kind = s => s.state === "stopped" ? ({ yes: "need", no: "noneed" })[s.attention] || "unknown" : s.state;
-const LABEL = { decide: "決めてほしい", permission: "許可待ち", need: "確認してほしい", unknown: "止まっている", noneed: "対応は不要", working: "作業中", background: "裏で作業中" };
-const MARK = { decide: "◆", permission: "▲", need: "●", unknown: "●", noneed: "✓" };
+const LABEL = { decide: "決めてほしい", permission: "許可待ち", ask: "質問に回答", need: "確認してほしい", unknown: "止まっている", noneed: "対応は不要", working: "作業中", background: "裏で作業中" };
+const MARK = { decide: "◆", permission: "▲", ask: "▲", need: "●", unknown: "●", noneed: "✓" };
 const MISSING = "一言なしで止まっている";
 // The buttons are offered on stopped rows only. The server refuses the others with 409.
 const canClose = s => s.state === "decide" || s.state === "stopped";
@@ -234,6 +239,10 @@ const btn = (cls, text, onclick, title) => h("button", { class: "cmd " + cls, on
 
 function say(s) {
   if (s.state === "permission") return "ターミナルで許可を出してほしい";
+  if (s.state === "ask") return arr(s.ask).map(q => q || {}).map(q => h("div", { class: "askq" },
+    h("b", {}, str(q.header), q.multi === true ? h("small", {}, "複数選べる") : null),
+    str(q.question),
+    h("div", { class: "opts" }, arr(q.options).map(o => h("span", {}, str(o))))));
   const qs = s.questions || [], rs = s.recommends || [];
   if (s.state === "decide" && qs.length) return h("ul", {}, qs.map((q, i) => h("li", {}, q, rs[i] ? h("span", { class: "rec" }, "推奨: " + rs[i]) : null)));
   if (s.state === "decide") return "決めてほしいこと " + s.decisions + " 件";
@@ -248,8 +257,10 @@ function sheet(s) {
     h("div", { class: "say" }, say(s)),
     h("div", { class: "meta", title: s.session_id }, [s.report_goal ? "目的: " + s.report_goal : null, startLabel(s), s.agent === "codex" ? "Codex" : null, s.term].filter(Boolean).join(" ・ ")),
     close && !s.term ? h("div", { class: "meta" }, "この端末は Home から操作できない(herdr か cmux の中で始めたセッションだけ)") : null,
+    s.state === "ask" && !s.term ? h("div", { class: "meta" }, "この端末は Home から前に出せないので、端末で回答してほしい") : null,
     s.answer_text ? h("div", { class: "send" }, h("b", {}, "「推奨で進める」で端末に送る文"), s.answer_text) : null,
     h("div", { class: "cmds" },
+      s.state === "ask" && s.term ? btn("go", "回答しに行く", () => post("/api/focus", s), "このセッションの端末を前に出す") : null,
       s.answer_text ? btn("go", "推奨で進める", () => post("/api/answer", s), "上の文を端末に入力して Enter を押す") : null,
       close && s.term ? btn(first === "focus" ? "go" : "sub", "端末へ行く", () => post("/api/focus", s), "このセッションの端末を前に出す") : null,
       close ? btn(first === "resolve" ? "go" : "sub", "外す", () => post("/api/resolve", s), "見たので一覧から外す。エージェントには何も送らない") : null,

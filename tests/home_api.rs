@@ -693,6 +693,11 @@ fn answer_types_the_recommended_options_once_and_only_into_a_stopped_session() {
     );
     assert_eq!(fs::read_to_string(&log).unwrap().lines().count(), lines_before);
     CALLS.lock().unwrap().clear();
+    // Focus needs the session only: a session asking before its first stop has no stop to name.
+    assert_eq!(post(port, "/api/focus", &token, &json!({"session_id": "ok", "resolves": null})).0, 200);
+    assert_eq!(post(port, "/api/focus", &token, &json!({"session_id": "ok"})).0, 200);
+    assert_eq!(post(port, "/api/focus", &token, &json!({"resolves": "x"})).0, 400);
+    CALLS.lock().unwrap().clear();
 
     // Accepted: the text built from the log and Enter, in one command, once, and an answer line.
     let (status, out) = post(port, "/api/answer", &token, &target("ok", 3));
@@ -914,4 +919,44 @@ fn the_page_can_tell_that_the_server_was_started_again() {
     // The page and /api/sessions of one server agree; another start has another value.
     assert_eq!(sessions(first)["boot"], json!(boot_of(first)));
     assert_ne!(boot_of(first), boot_of(second));
+}
+
+#[test]
+fn a_question_is_shown_with_the_permission_rows_until_it_is_answered() {
+    let dir = temp_dir();
+    let log = dir.join("events.jsonl");
+    let question = json!({"question": "どれにする?", "header": "選ぶ", "options": ["赤", "青"], "multi": true});
+    let mut lines: Vec<(&str, &str, Value)> = vec![
+        ("perm", "prompt", json!({})),
+        ("perm", "permission", json!({})),
+        ("st", "prompt", json!({})),
+        ("st", "stop", json!({})),
+        ("ask", "prompt", json!({})),
+        ("ask", "ask", json!({"ask": [question.clone()]})),
+        // The permission notification that comes with the question.
+        ("ask", "permission", json!({})),
+        ("wk", "prompt", json!({})),
+    ];
+    let base = SystemTime::now() - Duration::from_secs(60);
+    write_log(&log, &lines, base);
+    let (port, _) = start(&log);
+    let want: Vec<(String, String)> = [("ask", "ask"), ("perm", "permission"), ("st", "stopped"), ("wk", "working")]
+        .iter()
+        .map(|(a, b)| (a.to_string(), b.to_string()))
+        .collect();
+    assert_eq!(rows(port), want);
+    let all = sessions(port);
+    let rows_of = all["sessions"].as_array().unwrap();
+    assert_eq!(rows_of[0]["ask"], json!([question]));
+    assert_eq!(rows_of[0]["waits_for_human"], true);
+    for r in &rows_of[1..] {
+        assert_eq!(r["ask"], json!([]), "{r}");
+    }
+
+    lines.push(("ask", "asked", json!({})));
+    write_log(&log, &lines, base);
+    let all = sessions(port);
+    let row = all["sessions"].as_array().unwrap().iter().find(|r| r["session_id"] == "ask").unwrap().clone();
+    assert_eq!(row["state"], "working");
+    assert_eq!(row["ask"], json!([]));
 }

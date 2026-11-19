@@ -141,6 +141,7 @@ fn state_name(s: &Session) -> &'static str {
         St::Stopped if s.decisions > 0 => "decide",
         St::Stopped => "stopped",
         St::Permission => "permission",
+        St::Asking => "ask",
         St::Background => "background",
         _ => "working",
     }
@@ -160,6 +161,8 @@ fn row(s: &Session) -> Value {
         "report_goal": s.report_goal,
         "questions": s.questions,
         "recommends": s.recommends,
+        // The reducer keeps the questions only while Asking.
+        "ask": s.ask,
         "term": s.term,
         "answer_text": if s.st == St::Stopped && s.term.is_some() { term::answer_text(s) } else { None },
         "report_url": s.report_html.as_deref().and_then(report_link),
@@ -175,6 +178,13 @@ fn row(s: &Session) -> Value {
 struct Target {
     session_id: String,
     resolves: String,
+}
+
+/// What focus takes: the session only. Focus records nothing and does not depend on a stop, and a
+/// session asking a question before its first stop has none to name.
+#[derive(Deserialize)]
+struct FocusTarget {
+    session_id: String,
 }
 
 fn read_request(stream: &mut TcpStream) -> io::Result<Request> {
@@ -311,7 +321,10 @@ impl Server {
             ("GET", "/api/report") => self.report_json(&req.target),
             ("POST", "/api/resolve") => self.with_target(req, |t| self.resolve(t)),
             ("POST", "/api/kill") => self.with_target(req, |t| self.kill(t)),
-            ("POST", "/api/focus") => self.with_target(req, |t| self.focus(t)),
+            ("POST", "/api/focus") => match serde_json::from_slice::<FocusTarget>(&req.body) {
+                Ok(t) if !t.session_id.is_empty() => self.focus(&t.session_id),
+                _ => error(400, "session_id が要る"),
+            },
             ("POST", "/api/answer") => self.with_target(req, |t| self.answer(t)),
             _ => error(404, "not found"),
         }
@@ -463,8 +476,8 @@ impl Server {
     }
 
     /// Brings the session's terminal to the front. Nothing is recorded.
-    fn focus(&self, t: &Target) -> Response {
-        let session = match self.find(&t.session_id) {
+    fn focus(&self, session_id: &str) -> Response {
+        let session = match self.find(session_id) {
             Ok(s) => s,
             Err(r) => return r,
         };

@@ -12,6 +12,9 @@ pub enum St {
     Idle,
     Working,
     Permission,
+    /// The agent shows an AskUserQuestion prompt. The resolve, kill and answer lines do not
+    /// apply, as for Permission.
+    Asking,
     Stopped,
     /// Stopped, but waiting on background work (a stop line with `background`). The resolve and
     /// kill lines do not apply, as in every state other than Stopped.
@@ -35,6 +38,20 @@ pub enum Kind {
     End,
     /// Codex: a turn was interrupted (also when the human denied an approval).
     Interrupt,
+    /// The agent shows an AskUserQuestion prompt (PreToolUse).
+    Ask,
+    /// The human answered it (PostToolUse).
+    Asked,
+}
+
+/// One question of an AskUserQuestion prompt, as recorded on an ask line.
+#[derive(Clone, Debug, Default, PartialEq, Eq, serde::Serialize)]
+pub struct Question {
+    pub question: String,
+    pub header: String,
+    /// The labels of the options; their descriptions are not recorded.
+    pub options: Vec<String>,
+    pub multi: bool,
 }
 
 impl Kind {
@@ -49,6 +66,8 @@ impl Kind {
             "answer" => Kind::Answer,
             "end" => Kind::End,
             "interrupt" => Kind::Interrupt,
+            "ask" => Kind::Ask,
+            "asked" => Kind::Asked,
             _ => return None,
         })
     }
@@ -86,6 +105,8 @@ pub struct Event {
     pub term: Option<String>,
     pub term_id: Option<String>,
     pub term_ws: Option<String>,
+    /// ask only: the questions of the prompt.
+    pub ask: Vec<Question>,
 }
 
 /// The accumulator of the fold. `st`, `last_stop` and `decisions` are the model's `st`,
@@ -112,6 +133,8 @@ pub struct Session {
     pub term: Option<String>,
     pub term_id: Option<String>,
     pub term_ws: Option<String>,
+    /// The questions of the latest ask while Asking; empty in every other state.
+    pub ask: Vec<Question>,
     /// ts of the latest start line (startup, resume or clear). None if the log has none.
     pub started: Option<String>,
     /// From the latest start line: claude or codex. None on old lines.
@@ -155,7 +178,14 @@ pub fn step(acc: &Session, ev: &Event) -> Session {
             next.transcript_path = ev.transcript_path.clone();
         }
         Some(Kind::Prompt) => next.st = St::Working,
+        // A question brings a permission notification too; it stays a question.
+        Some(Kind::Permission) if acc.st == St::Asking => {}
         Some(Kind::Permission) => next.st = St::Permission,
+        Some(Kind::Ask) => {
+            next.st = St::Asking;
+            next.ask = ev.ask.clone();
+        }
+        Some(Kind::Asked) if acc.st == St::Asking => next.st = St::Working,
         Some(Kind::Stop) => {
             next.st = if ev.background { St::Background } else { St::Stopped };
             next.last_stop = Some(ev.ts.clone());
@@ -175,8 +205,11 @@ pub fn step(acc: &Session, ev: &Event) -> Session {
         Some(Kind::Answer) if current_stop(acc, &ev.resolves) => next.st = St::Answered,
         Some(Kind::End) => next.st = St::Ended,
         // The turn ended without a Stop; the agent waits for the next prompt, like after start.
-        Some(Kind::Interrupt) if matches!(acc.st, St::Working | St::Permission | St::Background) => next.st = St::Idle,
+        Some(Kind::Interrupt) if matches!(acc.st, St::Working | St::Permission | St::Asking | St::Background) => next.st = St::Idle,
         _ => {}
+    }
+    if next.st != St::Asking {
+        next.ask = Vec::new();
     }
     next.session_id = ev.session_id.clone();
     if !ev.cwd.is_empty() {
@@ -203,19 +236,19 @@ pub fn derive(events: &[Event]) -> Vec<Session> {
 
 /// `Shown(a)` in Home.tla.
 pub fn shown(s: &Session) -> bool {
-    matches!(s.st, St::Working | St::Permission | St::Stopped | St::Background)
+    matches!(s.st, St::Working | St::Permission | St::Asking | St::Stopped | St::Background)
 }
 
 /// Sessions without an update for this long are hidden.
 pub const HIDE_AFTER_US: i64 = 12 * 3600 * 1_000_000;
 
-/// Display order. Rows that wait for a human: decisions wanted, permission, a stop whose
+/// Display order. Rows that wait for a human: decisions wanted, permission or a question, a stop whose
 /// `Home:` line says 要, a stop without a readable `Home:` line. Then a stop that says 不要,
 /// then working (with working in the background).
 pub fn rank(s: &Session) -> u8 {
     match s.st {
         St::Stopped if s.decisions > 0 => 0,
-        St::Permission => 1,
+        St::Permission | St::Asking => 1,
         St::Stopped if s.attention == Attention::Needed => 2,
         St::Stopped if s.attention == Attention::Unknown => 3,
         St::Stopped => 4,

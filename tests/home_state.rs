@@ -2,7 +2,7 @@
 //! on random event sequences.
 
 use decidle::home::note::Attention;
-use decidle::home::state::{self, Event, Kind, St};
+use decidle::home::state::{self, Event, Kind, Question, St};
 
 /// `acc` of the model: st, lastStop (an index into the log, 0 = none), dec and att.
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -31,7 +31,21 @@ fn model_step(acc: Acc, ev: Ev, i: usize) -> Acc {
     match ev.e {
         "start" => Acc { st: "idle", last_stop: 0, dec: 0, att: "unknown" },
         "prompt" => Acc { st: "working", ..acc },
-        "permission" => Acc { st: "permission", ..acc },
+        "permission" => {
+            if acc.st == "asking" {
+                acc
+            } else {
+                Acc { st: "permission", ..acc }
+            }
+        }
+        "ask" => Acc { st: "asking", ..acc },
+        "asked" => {
+            if acc.st == "asking" {
+                Acc { st: "working", ..acc }
+            } else {
+                acc
+            }
+        }
         "stop" => Acc { st: if ev.bg { "background" } else { "stopped" }, last_stop: i, dec: ev.d, att: ev.a },
         "resolved" => {
             if acc.st == "stopped" && ev.res == acc.last_stop {
@@ -56,7 +70,7 @@ fn model_step(acc: Acc, ev: Ev, i: usize) -> Acc {
         }
         "end" => Acc { st: "ended", ..acc },
         "interrupt" => {
-            if matches!(acc.st, "working" | "permission" | "background") {
+            if matches!(acc.st, "working" | "permission" | "asking" | "background") {
                 Acc { st: "idle", ..acc }
             } else {
                 acc
@@ -74,12 +88,12 @@ fn model_derive(s: usize, log: &[Ev]) -> Acc {
 }
 
 fn model_shown(a: Acc) -> bool {
-    matches!(a.st, "working" | "permission" | "stopped" | "background")
+    matches!(a.st, "working" | "permission" | "asking" | "stopped" | "background")
 }
 
 /// WaitsTier(a) in Home.tla.
 fn model_waits(a: Acc) -> bool {
-    a.st == "permission" || a.st == "stopped" && (a.dec > 0 || matches!(a.att, "yes" | "unknown"))
+    matches!(a.st, "permission" | "asking") || a.st == "stopped" && (a.dec > 0 || matches!(a.att, "yes" | "unknown"))
 }
 
 fn att_name(a: Attention) -> &'static str {
@@ -92,6 +106,7 @@ fn st_name(st: St) -> &'static str {
         St::Idle => "idle",
         St::Working => "working",
         St::Permission => "permission",
+        St::Asking => "asking",
         St::Stopped => "stopped",
         St::Background => "background",
         St::Resolved => "resolved",
@@ -115,7 +130,8 @@ impl Rng {
     }
 }
 
-const KINDS: [&str; 9] = ["start", "prompt", "permission", "stop", "resolved", "kill", "end", "interrupt", "answer"];
+const KINDS: [&str; 11] =
+    ["start", "prompt", "permission", "stop", "resolved", "kill", "end", "interrupt", "answer", "ask", "asked"];
 const SESSIONS: usize = 3;
 
 fn ts_of(i: usize) -> String {
@@ -174,7 +190,7 @@ fn reducer_matches_model_on_random_logs() {
     let mut ignored = 0;
     // resolved and kill aimed at the current stop of a session waiting on background work.
     let mut refused_background = 0;
-    for _ in 0..5000 {
+    for _ in 0..8000 {
         let len = 1 + rng.below(40);
         let log = random_log(&mut rng, len);
         // Every prefix, so that each step is compared, not only the final state.
@@ -236,6 +252,7 @@ fn visible_hides_old_and_sorts_by_rank_then_newest() {
         ev("work2", "prompt", now - 5, 0),
         ev("stop1", "stop", now - 20, 0),
         ev("perm", "permission", now - 30, 0),
+        ev("ask", "ask", now - 35, 0),
         ev("decide", "stop", now - 40, 1),
         Event { background: true, ..ev("bg", "stop", now - 7, 1) },
         Event { attention: Attention::Needed, ..ev("need", "stop", now - 50, 0) },
@@ -243,9 +260,61 @@ fn visible_hides_old_and_sorts_by_rank_then_newest() {
         Event { attention: Attention::NotNeeded, ..ev("done-decide", "stop", now - 60, 1) },
     ];
     let rows: Vec<String> = state::visible(state::derive(&events), now).into_iter().map(|s| s.session_id).collect();
-    // Waiting for a human: decisions (whatever the Home line says), permission, 要, unknown.
-    // Below: 不要, then working. A stop waiting on background work sorts with the working rows.
-    assert_eq!(rows, ["decide", "done-decide", "perm", "need", "stop1", "done", "work2", "bg", "work1"]);
+    // Waiting for a human: decisions (whatever the Home line says), permission or a question, 要,
+    // unknown. Below: 不要, then working. A stop waiting on background work sorts with the working rows.
+    assert_eq!(rows, ["decide", "done-decide", "perm", "ask", "need", "stop1", "done", "work2", "bg", "work1"]);
     let waits: Vec<bool> = state::visible(state::derive(&events), now).iter().map(state::waits_for_human).collect();
-    assert_eq!(waits, [true, true, true, true, true, false, false, false, false]);
+    assert_eq!(waits, [true, true, true, true, true, true, false, false, false, false]);
+}
+
+#[test]
+fn a_question_waits_for_its_answer() {
+    let q = |text: &str| Question { question: text.into(), header: "h".into(), options: vec!["a".into(), "b".into()], multi: false };
+    let ev = |i: i64, kind: &str| Event {
+        ts: ts_of(i as usize),
+        ts_us: i,
+        session_id: "s".into(),
+        kind: Kind::parse(kind),
+        ..Event::default()
+    };
+    let ask = |i: i64, text: &str| Event { ask: vec![q(text)], ..ev(i, "ask") };
+    let stop = ev(3, "stop");
+    let stop_ts = stop.ts.clone();
+    let resolve = |i: i64, kind: &str| Event { resolves: Some(stop_ts.clone()), ..ev(i, kind) };
+    let mut log = vec![ev(1, "start"), ev(2, "prompt"), stop, ev(4, "prompt"), ask(5, "first")];
+    let at = |log: &[Event]| state::derive(log).remove(0);
+
+    let s = at(&log);
+    assert_eq!(s.st, St::Asking);
+    assert_eq!(s.ask, [q("first")]);
+    assert!(state::shown(&s) && state::waits_for_human(&s));
+    assert_eq!(state::rank(&s), 1);
+
+    // The permission notification of the question, and resolve, kill and answer, change nothing.
+    for (i, e) in [(6, ev(6, "permission")), (7, resolve(7, "resolved")), (8, resolve(8, "kill")), (9, resolve(9, "answer"))] {
+        log.push(e);
+        assert_eq!(at(&log).st, St::Asking, "after event {i}");
+    }
+    // A new ask replaces the questions.
+    log.push(ask(10, "second"));
+    assert_eq!(at(&log).ask, [q("second")]);
+    // The answer brings it back to working, and the questions are gone.
+    log.push(ev(11, "asked"));
+    let s = at(&log);
+    assert_eq!(s.st, St::Working);
+    assert!(s.ask.is_empty());
+
+    // An interrupt while asking goes to idle.
+    log.push(ask(12, "third"));
+    log.push(ev(13, "interrupt"));
+    let s = at(&log);
+    assert_eq!(s.st, St::Idle);
+    assert!(s.ask.is_empty());
+
+    // Closed with Esc: nothing is written, and the next prompt leaves the question.
+    log.push(ask(14, "fourth"));
+    log.push(ev(15, "prompt"));
+    let s = at(&log);
+    assert_eq!(s.st, St::Working);
+    assert!(s.ask.is_empty());
 }

@@ -243,3 +243,85 @@ fn compaction_does_not_hide_a_working_session() {
     assert_eq!(rows.len(), 1);
     assert_eq!(rows[0].st, decidle::home::state::St::Working);
 }
+
+#[test]
+fn a_question_is_recorded_without_descriptions_or_answers() {
+    let home = temp_home();
+    let secret = "SECRET-answer-どれも微妙";
+    let question = |n: usize| {
+        let options: Vec<Value> =
+            (0..10).map(|k| json!({"label": format!("q{n}o{k}"), "description": format!("DESC-{n}-{k}")})).collect();
+        json!({"question": format!("q{n}\nwhich?"), "header": format!("h{n}"), "options": options, "multiSelect": n == 1})
+    };
+    let mut questions: Vec<Value> = (0..5).map(question).collect();
+    questions[0]["question"] = json!("問".repeat(250));
+    questions[0]["header"] = json!("見".repeat(50));
+    questions[0]["options"][0]["label"] = json!("択".repeat(100));
+    let base = |name: &str, tool: &str| json!({"session_id": "s", "cwd": "/w", "hook_event_name": name, "tool_name": tool});
+    let mut pre = base("PreToolUse", "AskUserQuestion");
+    pre["tool_input"] = json!({"questions": questions});
+    let mut post = base("PostToolUse", "AskUserQuestion");
+    post["tool_input"] = json!({"questions": [question(0)], "answers": {"q0": secret}});
+    post["tool_response"] = json!({"questions": [question(0)], "answers": {"q0": secret}});
+    let mut other_pre = base("PreToolUse", "Bash");
+    other_pre["tool_input"] = json!({"command": "ls"});
+    let other_post = base("PostToolUse", "Bash");
+    for input in [&pre, &other_pre, &other_post, &post] {
+        let out = hook(&home, &input.to_string());
+        assert_eq!(out.status.code(), Some(0));
+        assert!(out.stdout.is_empty());
+    }
+    let text = fs::read_to_string(log_of(&home)).unwrap();
+    assert!(!text.contains("DESC-") && !text.contains(secret), "{text}");
+    let lines = lines(&home);
+    let events: Vec<&str> = lines.iter().map(|v| v["event"].as_str().unwrap()).collect();
+    assert_eq!(events, ["ask", "asked"]);
+    assert!(lines[1].get("ask").is_none());
+
+    let ask = lines[0]["ask"].as_array().unwrap();
+    assert_eq!(ask.len(), 4, "only the first four questions");
+    assert_eq!(ask[0]["question"], format!("{}…", "問".repeat(200)));
+    assert_eq!(ask[0]["header"], format!("{}…", "見".repeat(40)));
+    let options = ask[0]["options"].as_array().unwrap();
+    assert_eq!(options.len(), 8, "only the first eight options");
+    assert_eq!(options[0], format!("{}…", "択".repeat(80)));
+    assert_eq!(options[7], "q0o7");
+    assert_eq!(ask[1]["question"], "q1 which?", "line breaks become spaces");
+    assert_eq!(ask[1]["header"], "h1");
+    assert_eq!((ask[0]["multi"].clone(), ask[1]["multi"].clone()), (json!(false), json!(true)));
+
+    // The server reads the questions back.
+    let loaded = read::load(&log_of(&home)).unwrap();
+    assert_eq!(loaded.events[0].kind, Some(Kind::Ask));
+    assert_eq!(loaded.events[0].ask.len(), 4);
+    assert_eq!(loaded.events[0].ask[1].options[0], "q1o0");
+    assert!(loaded.events[0].ask[1].multi);
+    assert_eq!(loaded.events[1].kind, Some(Kind::Asked));
+}
+
+#[test]
+fn ask_values_of_the_wrong_shape_read_as_empty() {
+    let home = temp_home();
+    let log = log_of(&home);
+    fs::create_dir_all(log.parent().unwrap()).unwrap();
+    let line = |i: usize, event: &str, ask: Value| {
+        json!({"ts": format!("2026-11-19T00:00:00.{i:06}Z"), "session_id": "s", "cwd": "/w", "event": event, "ask": ask})
+            .to_string()
+    };
+    let text = [
+        line(1, "ask", json!("not an array")),
+        line(2, "ask", json!([1, {"question": 5, "header": "h", "options": ["a", 2], "multi": "yes"}])),
+        // Only an ask line carries questions.
+        line(3, "prompt", json!([{"question": "q", "header": "h", "options": ["a"], "multi": true}])),
+    ]
+    .join("\n");
+    fs::write(&log, text + "\n").unwrap();
+    let loaded = read::load(&log).unwrap();
+    assert_eq!(loaded.skipped, 0);
+    assert!(loaded.events[0].ask.is_empty());
+    let ask = &loaded.events[1].ask;
+    assert_eq!(ask.len(), 1);
+    assert_eq!((ask[0].question.as_str(), ask[0].header.as_str(), ask[0].multi), ("", "h", false));
+    assert_eq!(ask[0].options, ["a", ""]);
+    assert!(loaded.events[2].ask.is_empty());
+}
