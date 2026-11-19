@@ -1,7 +1,7 @@
 //! Deleting old reports. `decidle serve` runs this at start and once a day after that, and
 //! `decidle clean` runs it by hand. Only the files that a stop line recorded (report_path and
 //! report_html) are deleted, and only when every session that recorded the path has been
-//! resolved or ended for the configured number of days. See "報告の自動削除" in docs/spec-home.md.
+//! resolved or ended for the configured number of days.
 //! Nothing is written to events.jsonl.
 
 use std::collections::{BTreeMap, HashMap};

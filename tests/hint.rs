@@ -1,5 +1,4 @@
 //! `decidle hint`, the PostToolUse hook that hands the report format over once per turn.
-//! See docs/spec-report-hint.md.
 
 use serde_json::{json, Value};
 use std::fs;

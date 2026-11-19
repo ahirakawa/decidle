@@ -1,5 +1,5 @@
 //! The terminals the Home page can drive: bringing an agent's terminal to the front, and typing
-//! the report's recommended options into it. See "端末へ行く、勧めで答える" in docs/spec-home.md.
+//! the report's recommended options into it.
 
 use std::io;
 use std::process::{Command, Stdio};
@@ -173,8 +173,7 @@ pub fn raise_command(bundle_id: &str) -> Vec<String> {
 /// A herdr pane keeps its id when the agent in it ends and another one starts, so the pane
 /// can come to hold another session; an hc terminal goes on with a shell, or another program.
 /// The command whose output says what the terminal holds now; None for other terminals. The
-/// check and the send are two commands, so a swap in between is not caught (see
-/// docs/spec-home.md).
+/// check and the send are two commands, so a swap in between is not caught.
 pub fn occupant_command(s: &Session) -> Option<Vec<String>> {
     match (s.term.as_deref()?, s.term_id.as_deref()?) {
         ("herdr", id) => Some(vec!["herdr".into(), "agent".into(), "get".into(), id.into()]),

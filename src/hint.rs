@@ -1,5 +1,5 @@
 //! `decidle hint`: the PostToolUse hook that tells the agent a report is needed, once per turn,
-//! as soon as the turn crosses the Stop hook's conditions. See docs/spec-report-hint.md.
+//! as soon as the turn crosses the Stop hook's conditions.
 //! The Stop hook is unchanged and still blocks a stop without a report.
 
 use serde::Deserialize;

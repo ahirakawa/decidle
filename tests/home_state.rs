@@ -1,4 +1,4 @@
-//! The Rust reducer against a direct transcription of `Step` in docs/tla/Home.tla,
+//! The Rust reducer against a separate reference model of the same rules,
 //! on random event sequences.
 
 use decidle::home::note::Attention;
@@ -91,7 +91,7 @@ fn model_shown(a: Acc) -> bool {
     matches!(a.st, "working" | "permission" | "asking" | "stopped" | "background")
 }
 
-/// WaitsTier(a) in Home.tla.
+/// Whether the reference model puts the session among the rows waiting for a human.
 fn model_waits(a: Acc) -> bool {
     matches!(a.st, "permission" | "asking") || a.st == "stopped" && (a.dec > 0 || matches!(a.att, "yes" | "unknown"))
 }

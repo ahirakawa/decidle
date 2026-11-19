@@ -1,6 +1,6 @@
 # decidle の Herdr アプリ用 mod
 
-Herdr アプリのターミナルの右に、`decidle serve` の Home の一覧を出す。仕様は `docs/spec-herdr-app.md` の「mod」の節にある。
+Herdr アプリのターミナルの右に、`decidle serve` の Home の一覧を出す。
 
 ## インストール
 

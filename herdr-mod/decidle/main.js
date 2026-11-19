@@ -1,6 +1,6 @@
 // decidle Home inside the Herdr app: the rows of `decidle serve`'s /api/sessions, beside the
 // terminals. It reads and writes through the HTTP API only; the server keeps the lock and the
-// checks that an answer is sent once. See docs/spec-herdr-app.md, "mod".
+// checks that an answer is sent once.
 
 import { View, div } from "gpui-kit";
 import { v_flex, h_flex } from "gpui-base";

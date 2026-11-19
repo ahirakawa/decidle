@@ -1,4 +1,4 @@
-//! Which agent runs the hook: Claude Code or Codex CLI. See "Codex CLI" in docs/spec-home.md.
+//! Which agent runs the hook: Claude Code or Codex CLI.
 
 use serde_json::Value;
 

@@ -43,7 +43,7 @@ Codex CLI (tested with 0.169) can use the same binary for report checks and Home
 1. Append `docs/codex-hooks-snippet.toml` to `~/.codex/config.toml`.
 2. In codex, open `/hooks` and trust the hooks you added. They do not run until you trust them.
 
-In Codex, waiting for permission is recorded from PermissionRequest, and denied approvals and interrupts from Interrupt. A session disappears from the table after an interrupt. Limits (not tested: the flow after you allow an approval, compaction, resume, stopping without waiting for a subagent, and more) are in the "Codex CLI" section of `docs/spec-home.md` (Japanese).
+In Codex, waiting for permission is recorded from PermissionRequest, and denied approvals and interrupts from Interrupt. A session disappears from the table after an interrupt. Not tested: the flow after you allow an approval, compaction, resume, stopping without waiting for a subagent, and more.
 
 ## Use with Herdr
 
@@ -84,21 +84,13 @@ You do not need `./install-roles.sh` either.
 ## Usage
 
 - To turn decidle off for a terminal, start it with `DECIDLE_MODE=off claude`.
-- Check results are logged to `~/.local/share/decidle/gate.jsonl`. Use the SQL in `docs/queries.sql` to aggregate them.
+- Check results are logged to `~/.local/share/decidle/gate.jsonl`.
 - A report is required only for turns that edit 3 or more files, make 20 or more tool calls, or run `maestri ask`. Change the numbers with `edited_files_threshold` and `tool_call_threshold`.
 - To change limits such as character counts or which extensions count as code, put a file shaped like `config.default.json` at `~/.config/decidle/config.json`. Only the keys you write are overridden.
 - Report JSON and pages go to `.decidle/` in the working folder. Add it to your own gitignore if you do not want it in git.
-- Open a report page from the title of its row on the Home page. Start Home with `decidle serve` and open `http://127.0.0.1:7878/` (the port is `home_port`). The spec is `docs/spec-home.md` (Japanese).
-- Report JSON and pages are deleted 1 day after the session is resolved or ended. `decidle serve` deletes them at startup and once a day. Run `decidle clean` to delete them by hand, or `decidle clean --dry-run` to only list them. Change the days with `clean_after_days`; 0 keeps them. Reports whose decisions were never answered (including sessions closed with the end button) are deleted 7 days after the end. Change the days with `clean_unanswered_after_days`; 0 keeps them. The two settings work independently. decidle does not delete reports of sessions still running, reports of sessions shown on Home, files not in its records, or files outside `.decidle/`. Details are in "報告の自動削除" in `docs/spec-home.md`.
+- Open a report page from the title of its row on the Home page. Start Home with `decidle serve` and open `http://127.0.0.1:7878/` (the port is `home_port`).
+- Report JSON and pages are deleted 1 day after the session is resolved or ended. `decidle serve` deletes them at startup and once a day. Run `decidle clean` to delete them by hand, or `decidle clean --dry-run` to only list them. Change the days with `clean_after_days`; 0 keeps them. Reports whose decisions were never answered (including sessions closed with the end button) are deleted 7 days after the end. Change the days with `clean_unanswered_after_days`; 0 keeps them. The two settings work independently. decidle does not delete reports of sessions still running, reports of sessions shown on Home, files not in its records, or files outside `.decidle/`.
 - Opening a Maestri portal for each report is off by default. To turn it back on, set `portal_command` to `"maestri"`. Then, in a Maestri terminal, decidle opens a portal named after the task on the canvas after it writes the page. It does not open one in worker terminals started by an orchestrator (terminals connected to other agents, not the Maestro).
-
-## Count revision requests
-
-```
-~/.local/bin/decidle extract > extract.jsonl
-```
-
-Have an LLM classify the output with the instructions in `docs/classify-prompt.md`, then aggregate by week with the last SQL in `docs/queries.sql`. The output contains the prompts as they are, so do not commit it.
 
 ## Known limits
 

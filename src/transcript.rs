@@ -124,7 +124,7 @@ pub fn load(path: &Path) -> std::io::Result<Vec<Entry>> {
 
 /// Codex CLI transcripts (`~/.codex/sessions/.../rollout-*.jsonl`), read into the same entries as
 /// Claude Code's. Every line is `{timestamp, ordinal, type, payload}`. The shapes follow what
-/// Codex CLI 0.169 wrote in a trial; see "Codex CLI" in docs/spec-home.md.
+/// Codex CLI 0.169 wrote in a trial.
 ///
 /// - `session_meta`, `turn_context` and `event_msg` (`task_started`) give the session id, the cwd
 ///   and the current turn id. Each entry gets the current turn id as its prompt id, so that the

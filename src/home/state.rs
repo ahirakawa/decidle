@@ -1,4 +1,4 @@
-//! Deriving each session's state from the events. This is `Step` in docs/tla/Home.tla.
+//! Deriving each session's state from the events.
 //! Everything here is free of side effects; the caller passes the events and the current time.
 
 use std::collections::HashMap;
@@ -158,7 +158,7 @@ fn current_stop(acc: &Session, resolves: &Option<String>) -> bool {
     acc.st == St::Stopped && resolves.is_some() && *resolves == acc.last_stop
 }
 
-/// One step of the fold, the same rules as `Step(acc, ev, i)` in Home.tla.
+/// One step of the fold.
 pub fn step(acc: &Session, ev: &Event) -> Session {
     let mut next = acc.clone();
     match ev.kind {
@@ -245,7 +245,7 @@ pub fn derive(events: &[Event]) -> Vec<Session> {
     out
 }
 
-/// `Shown(a)` in Home.tla.
+/// Whether the session has a row on the Home page.
 pub fn shown(s: &Session) -> bool {
     matches!(s.st, St::Working | St::Permission | St::Asking | St::Stopped | St::Background)
 }
