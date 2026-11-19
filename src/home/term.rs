@@ -23,12 +23,17 @@ fn is_uuid(id: &str) -> bool {
     id.len() == 36 && id.chars().enumerate().all(|(i, c)| if matches!(i, 8 | 13 | 18 | 23) { c == '-' } else { c.is_ascii_hexdigit() })
 }
 
-/// Reads the terminal from the hook's environment. herdr wins over cmux, since herdr may run
-/// inside a cmux terminal and then the pane is the one to address.
+/// Reads the terminal from the hook's environment, taking herdr, then hc, then cmux. herdr comes
+/// first since the TUI may run inside an app terminal (or a cmux one), and then its pane is the
+/// one to address. hc comes before cmux since an hc terminal inherits the environment of the
+/// shell that started herdr-core, which may hold a cmux surface.
 pub fn from_env(var: impl Fn(&str) -> Option<String>) -> Option<Recorded> {
     let get = |k: &str| var(k).filter(|v| valid_id(v));
     if let Some(id) = get("HERDR_PANE_ID") {
         return Some(Recorded { kind: "herdr", id, workspace: None });
+    }
+    if let Some(id) = get("HC_TERMINAL_ID") {
+        return Some(Recorded { kind: "hc", id, workspace: None });
     }
     let id = get("CMUX_SURFACE_ID")?;
     Some(Recorded { kind: "cmux", id, workspace: get("CMUX_WORKSPACE_ID") })
@@ -42,6 +47,8 @@ pub fn checked(
 ) -> (Option<String>, Option<String>, Option<String>) {
     match (term.as_deref(), id) {
         (Some("herdr"), Some(id)) if valid_id(&id) => (term, Some(id), None),
+        // A terminal on another machine (`host/t1`) fails `valid_id` on its slash.
+        (Some("hc"), Some(id)) if valid_id(&id) => (term, Some(id), None),
         // cmux also takes an index or a short ref where it takes an id, and those can come to
         // name another terminal. Only the UUIDs it puts in the environment are accepted, and
         // the workspace must come with the surface.
@@ -100,12 +107,15 @@ pub fn focus_commands(s: &Session) -> Option<Vec<Vec<String>>> {
             Some(out)
         }
         "herdr" => Some(vec![vec!["herdr".into(), "agent".into(), "focus".into(), id.into()]]),
+        "hc" => Some(vec![vec!["herdr-app".into(), "do".into(), "pane.focus".into(), "--terminal".into(), id.into()]]),
         _ => None,
     }
 }
 
 /// The commands that type `text` and Enter into the terminal. cmux refuses by itself when the
-/// agent's prompt holds a draft or a dialog is open; we never pass --force.
+/// agent's prompt holds a draft or a dialog is open; we never pass --force. hc refuses a blocked
+/// terminal (exit code 9) without --force, and waits on a person's draft; we pass neither --force
+/// nor --if (a stopped Claude Code reads as done, which --if cannot name), nor --wait.
 pub fn answer_commands(s: &Session, text: &str) -> Option<Vec<Vec<String>>> {
     let id = s.term_id.as_deref()?;
     match s.term.as_deref()? {
@@ -122,6 +132,7 @@ pub fn answer_commands(s: &Session, text: &str) -> Option<Vec<Vec<String>>> {
             Some(vec![send])
         }
         "herdr" => Some(vec![vec!["herdr".into(), "agent".into(), "prompt".into(), id.into(), text.into()]]),
+        "hc" => Some(vec![vec!["hc".into(), "send".into(), id.into(), text.into()]]),
         _ => None,
     }
 }
@@ -141,22 +152,29 @@ pub fn raise_command(bundle_id: &str) -> Vec<String> {
 }
 
 /// A herdr pane keeps its id when the agent in it ends and another one starts, so the pane
-/// can come to hold another session. The command whose output says which agent session the
-/// pane holds now; None for other terminals. The check and the send are two commands, so a
-/// swap in between is not caught (see docs/spec-home.md).
+/// can come to hold another session; an hc terminal goes on with a shell, or another program.
+/// The command whose output says what the terminal holds now; None for other terminals. The
+/// check and the send are two commands, so a swap in between is not caught (see
+/// docs/spec-home.md).
 pub fn occupant_command(s: &Session) -> Option<Vec<String>> {
     match (s.term.as_deref()?, s.term_id.as_deref()?) {
         ("herdr", id) => Some(vec!["herdr".into(), "agent".into(), "get".into(), id.into()]),
+        ("hc", id) => Some(vec!["hc".into(), "get".into(), id.into()]),
         _ => None,
     }
 }
 
-/// Whether the output of `occupant_command` names this session.
-pub fn occupant_is(output: &str, session_id: &str) -> bool {
-    serde_json::from_str::<serde_json::Value>(output)
-        .ok()
-        .and_then(|v| v.pointer("/result/agent/agent_session/value").and_then(|x| x.as_str()).map(|x| x == session_id))
-        .unwrap_or(false)
+/// Whether the output of `occupant_command` shows this session: herdr names the agent session;
+/// hc names no session, so its foreground process must be the pid recorded at start.
+pub fn occupant_is(output: &str, s: &Session) -> bool {
+    let Ok(v) = serde_json::from_str::<serde_json::Value>(output) else {
+        return false;
+    };
+    match s.term.as_deref() {
+        Some("herdr") => v.pointer("/result/agent/agent_session/value").and_then(|x| x.as_str()) == Some(s.session_id.as_str()),
+        Some("hc") => s.pid.is_some() && v.pointer("/foreground/pid").and_then(|x| x.as_i64()) == s.pid,
+        _ => false,
+    }
 }
 
 const RUN_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(2);

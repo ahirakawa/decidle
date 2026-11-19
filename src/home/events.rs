@@ -92,7 +92,8 @@ pub fn parse_rfc3339_us(text: &str) -> Option<i64> {
     Some(((days * 86400 + hh * 3600 + mm * 60 + ss) * 1_000_000) + micros)
 }
 
-fn private_dir(path: &Path) -> io::Result<()> {
+/// Creates the folder if needed and makes it readable by the owner only.
+pub fn private_dir(path: &Path) -> io::Result<()> {
     fs::create_dir_all(path)?;
     if !fs::symlink_metadata(path)?.is_dir() {
         return Err(io::Error::new(io::ErrorKind::InvalidData, format!("{}: フォルダではない", path.display())));

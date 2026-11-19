@@ -805,6 +805,111 @@ fn herdr_pane_is_checked_to_still_hold_the_session_before_anything_is_typed() {
     let _ = claude.wait();
 }
 
+static HC_CALLS: std::sync::Mutex<Vec<Vec<String>>> = std::sync::Mutex::new(Vec::new());
+/// The pid in front of terminal t3; t4 has a shell (pid 1) in front.
+static HC_FOREGROUND: std::sync::atomic::AtomicI64 = std::sync::atomic::AtomicI64::new(0);
+
+/// An hc whose `get` reports the foreground process of each terminal.
+fn fake_hc(argv: &[String]) -> Result<String, String> {
+    HC_CALLS.lock().unwrap().push(argv.to_vec());
+    if argv[..2] == ["hc".to_string(), "get".to_string()] {
+        let pid = if argv[2] == "t3" { HC_FOREGROUND.load(Ordering::SeqCst) } else { 1 };
+        return Ok(json!({"address": argv[2], "foreground": {"name": "claude", "pid": pid}, "pid": 1}).to_string());
+    }
+    Ok(String::new())
+}
+
+#[test]
+fn hc_terminal_is_checked_to_still_run_the_recorded_claude_before_anything_is_typed() {
+    let dir = temp_dir();
+    let mut claude = fake_claude(&dir);
+    let pid = claude.id() as i64;
+    HC_FOREGROUND.store(pid, Ordering::SeqCst);
+    let started = procinfo::info(pid).unwrap().started;
+    let log = dir.join("events.jsonl");
+    let base = SystemTime::now() - Duration::from_secs(60);
+    let idle = transcript(&dir, "idle.jsonl", &[("user", base), ("assistant", base)]);
+    let rec = |t: &str| json!({"pid": pid, "pid_started": started, "transcript_path": idle, "term": "hc", "term_id": t});
+    let asked = json!({"report_title": "題", "decisions": 1, "questions": ["問い"], "recommends": ["推奨"]});
+    let ts = write_log(
+        &log,
+        &[
+            ("mine", "start", rec("t3")),
+            ("mine", "stop", asked.clone()),
+            ("swapped", "start", rec("t4")),
+            ("swapped", "stop", asked.clone()),
+            ("remote", "start", rec("host/t1")),
+            ("remote", "stop", asked),
+        ],
+        base,
+    );
+    let (port, token) = start_with(&log, fake_hc);
+    let strs = |v: &[&str]| v.iter().map(|s| s.to_string()).collect::<Vec<String>>();
+    let row = |sid: &str| sessions(port)["sessions"].as_array().unwrap().iter().find(|r| r["session_id"] == sid).unwrap().clone();
+    assert_eq!(row("mine")["term"], json!("hc"));
+    assert_eq!(row("remote")["term"], Value::Null);
+    // The mod brings the terminal to the front by its id.
+    assert_eq!(row("mine")["term_id"], json!("t3"));
+    assert_eq!(row("remote")["term_id"], Value::Null);
+
+    // Another program is in front of the terminal: refused, nothing typed or appended.
+    let swapped = json!({"session_id": "swapped", "resolves": ts[3]});
+    assert_eq!(post(port, "/api/answer", &token, &swapped).0, 409);
+    assert_eq!(post(port, "/api/focus", &token, &swapped).0, 409);
+    assert_eq!(post(port, "/api/answer", &token, &json!({"session_id": "remote", "resolves": ts[5]})).0, 409);
+    assert!(HC_CALLS.lock().unwrap().iter().all(|c| c[1] == "get"), "{:?}", HC_CALLS.lock().unwrap());
+    assert_eq!(count_of(&log, "answer"), 0);
+    HC_CALLS.lock().unwrap().clear();
+
+    let mine = json!({"session_id": "mine", "resolves": ts[1]});
+    assert_eq!(post(port, "/api/focus", &token, &mine).0, 200);
+    assert_eq!(*HC_CALLS.lock().unwrap(), vec![strs(&["hc", "get", "t3"]), strs(&["herdr-app", "do", "pane.focus", "--terminal", "t3"])]);
+    HC_CALLS.lock().unwrap().clear();
+
+    let (status, out) = post(port, "/api/answer", &token, &mine);
+    assert_eq!(status, 200, "{out}");
+    assert_eq!(*HC_CALLS.lock().unwrap(), vec![strs(&["hc", "get", "t3"]), strs(&["hc", "send", "t3", "回答: 問いは「推奨」で進めて。"])]);
+    assert_eq!(count_of(&log, "answer"), 1);
+    // A second press sends nothing.
+    assert_eq!(post(port, "/api/answer", &token, &mine).0, 409);
+    assert_eq!(HC_CALLS.lock().unwrap().len(), 2);
+    assert_eq!(count_of(&log, "answer"), 1);
+    let _ = claude.kill();
+    let _ = claude.wait();
+}
+
+#[test]
+fn the_token_file_holds_this_start_s_token_for_the_owner_only() {
+    use std::os::unix::fs::PermissionsExt;
+    let dir = temp_dir();
+    let log = dir.join("events.jsonl");
+    let path = dir.join("share/home.token");
+    let write_log_line = |sid: &str| write_log(&log, &[(sid, "start", json!({}))], SystemTime::now());
+
+    let first = Server::bind(0, log.clone()).unwrap();
+    first.write_token(&path).unwrap();
+    let old = fs::read_to_string(&path).unwrap();
+    assert_eq!(old.len(), 64);
+    assert_eq!(fs::metadata(&path).unwrap().permissions().mode() & 0o777, 0o600);
+    assert_eq!(fs::metadata(path.parent().unwrap()).unwrap().permissions().mode() & 0o777, 0o700);
+
+    // A later start replaces the file; the token from the file is the one the server takes, in
+    // the header, with the same Origin check as the page.
+    let ts = write_log_line("s");
+    let server = Server::bind(0, log.clone()).unwrap();
+    server.write_token(&path).unwrap();
+    let port = server.port();
+    std::thread::spawn(move || server.run());
+    let token = fs::read_to_string(&path).unwrap();
+    assert_ne!(token, old);
+    assert_eq!(fs::metadata(&path).unwrap().permissions().mode() & 0o777, 0o600);
+    let target = json!({"session_id": "s", "resolves": ts[0]}).to_string();
+    assert_eq!(request(port, "POST", "/api/resolve", &[("X-Decidle-Token", &token)], &target).0, 403);
+    assert_eq!(post(port, "/api/resolve", &old, &json!({"session_id": "s", "resolves": ts[0]})).0, 403);
+    assert_eq!(post(port, "/api/resolve", &token, &json!({"session_id": "s", "resolves": ts[0]})).0, 200);
+    assert!(fs::read_dir(path.parent().unwrap()).unwrap().count() == 1, "no leftover file beside the token");
+}
+
 static RAISE_CALLS: std::sync::Mutex<Vec<Vec<String>>> = std::sync::Mutex::new(Vec::new());
 
 fn record_raise(argv: &[String]) -> Result<String, String> {

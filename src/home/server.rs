@@ -23,6 +23,11 @@ const IO_TIMEOUT: Duration = Duration::from_secs(5);
 /// The server holds the lock only for one read of the log, so it may wait longer than a hook.
 const KILL_LOCK_TIMEOUT: Duration = Duration::from_secs(5);
 
+/// Where `decidle serve` writes its token for the Herdr app mod.
+pub fn token_path() -> PathBuf {
+    PathBuf::from(std::env::var("HOME").unwrap_or_default()).join(".local/share/decidle/home.token")
+}
+
 pub struct Server {
     listener: TcpListener,
     port: u16,
@@ -164,6 +169,8 @@ fn row(s: &Session) -> Value {
         // The reducer keeps the questions only while Asking.
         "ask": s.ask,
         "term": s.term,
+        // The Herdr app mod brings an hc terminal to the front by this id, without the server.
+        "term_id": s.term_id,
         "answer_text": if s.st == St::Stopped && s.term.is_some() { term::answer_text(s) } else { None },
         "report_url": s.report_html.as_deref().and_then(report_link),
         "decisions": s.decisions,
@@ -265,6 +272,29 @@ impl Server {
 
     pub fn port(&self) -> u16 {
         self.port
+    }
+
+    /// Writes this start's token to `path`, readable by the owner only, for the Herdr app mod,
+    /// which cannot read it from the page. The file is written beside and renamed over, so a
+    /// reader never sees half a token.
+    pub fn write_token(&self, path: &Path) -> io::Result<()> {
+        use std::os::unix::fs::OpenOptionsExt;
+        let dir = path.parent().ok_or_else(|| io::Error::new(io::ErrorKind::InvalidInput, "no folder"))?;
+        events::private_dir(dir)?;
+        let name = path.file_name().ok_or_else(|| io::Error::new(io::ErrorKind::InvalidInput, "no file name"))?;
+        let tmp = dir.join(format!(".{}.{}", name.to_string_lossy(), std::process::id()));
+        let _ = std::fs::remove_file(&tmp);
+        let mut file = std::fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .mode(0o600)
+            .custom_flags(libc::O_NOFOLLOW)
+            .open(&tmp)?;
+        let written = file.write_all(self.token.as_bytes()).and_then(|_| file.sync_all()).and_then(|_| std::fs::rename(&tmp, path));
+        if written.is_err() {
+            let _ = std::fs::remove_file(&tmp);
+        }
+        written
     }
 
     /// Serves one connection at a time, forever.
@@ -529,7 +559,7 @@ impl Server {
             return Ok(());
         };
         match (self.runner)(&argv) {
-            Ok(out) if term::occupant_is(&out, &session.session_id) => Ok(()),
+            Ok(out) if term::occupant_is(&out, session) => Ok(()),
             Ok(_) => Err(error(409, "記録したペインには、いま別のものが入っている")),
             Err(e) => Err(error(409, &format!("記録したペインに、このセッションが見つからない: {e}"))),
         }
@@ -550,6 +580,10 @@ pub fn serve(port: u16, clean: super::clean::Settings) -> i32 {
     match Server::bind(port, events::events_path()) {
         Ok(mut server) => {
             server.set_host_app(term::host_app(|k| std::env::var(k).ok()));
+            // Without the file the mod cannot POST; the browser Home still works.
+            if let Err(e) = server.write_token(&token_path()) {
+                eprintln!("decidle serve: 合言葉を {} に書けない: {e}", token_path().display());
+            }
             eprintln!("decidle serve: http://127.0.0.1:{}/", server.port());
             // Old reports: now, then once a day (see clean.rs).
             super::clean::spawn_daily(events::events_path(), clean);

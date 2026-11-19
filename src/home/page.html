@@ -256,7 +256,7 @@ function sheet(s) {
     h("span", { class: "lab" }, s.folder + " ／ " + LABEL[k]),
     h("div", { class: "say" }, say(s)),
     h("div", { class: "meta", title: s.session_id }, [s.report_goal ? "目的: " + s.report_goal : null, startLabel(s), s.agent === "codex" ? "Codex" : null, s.term].filter(Boolean).join(" ・ ")),
-    close && !s.term ? h("div", { class: "meta" }, "この端末は Home から操作できない(herdr か cmux の中で始めたセッションだけ)") : null,
+    close && !s.term ? h("div", { class: "meta" }, "この端末は Home から操作できない(herdr、Herdr アプリ、cmux の中で始めたセッションだけ)") : null,
     s.state === "ask" && !s.term ? h("div", { class: "meta" }, "この端末は Home から前に出せないので、端末で回答してほしい") : null,
     s.answer_text ? h("div", { class: "send" }, h("b", {}, "「推奨で進める」で端末に送る文"), s.answer_text) : null,
     h("div", { class: "cmds" },

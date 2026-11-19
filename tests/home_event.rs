@@ -325,3 +325,28 @@ fn ask_values_of_the_wrong_shape_read_as_empty() {
     assert_eq!(ask[0].options, ["a", ""]);
     assert!(loaded.events[2].ask.is_empty());
 }
+
+#[test]
+fn start_records_the_app_terminal_from_hc_terminal_id() {
+    let start = json!({"session_id": "s", "cwd": "/w", "hook_event_name": "SessionStart", "source": "startup"}).to_string();
+    let run = |vars: &[(&str, &str)]| {
+        let home = temp_home();
+        let mut cmd = Command::new(env!("CARGO_BIN_EXE_decidle"));
+        cmd.arg("event").env("HOME", &home).stdin(Stdio::piped()).stdout(Stdio::piped()).stderr(Stdio::piped());
+        for k in ["HERDR_PANE_ID", "HC_TERMINAL_ID", "CMUX_SURFACE_ID", "CMUX_WORKSPACE_ID"] {
+            cmd.env_remove(k);
+        }
+        cmd.envs(vars.iter().copied());
+        let mut child = cmd.spawn().unwrap();
+        child.stdin.take().unwrap().write_all(start.as_bytes()).unwrap();
+        assert_eq!(child.wait_with_output().unwrap().status.code(), Some(0));
+        let line = lines(&home).pop().unwrap();
+        (line["term"].clone(), line["term_id"].clone())
+    };
+    let cmux = [("CMUX_SURFACE_ID", "11111111-2222-3333-4444-555555555555"), ("CMUX_WORKSPACE_ID", "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee")];
+    assert_eq!(run(&[("HC_TERMINAL_ID", "t3")]), (json!("hc"), json!("t3")));
+    assert_eq!(run(&[cmux[0], cmux[1], ("HC_TERMINAL_ID", "t3")]), (json!("hc"), json!("t3")));
+    assert_eq!(run(&[("HC_TERMINAL_ID", "t3"), ("HERDR_PANE_ID", "w1:p2")]), (json!("herdr"), json!("w1:p2")));
+    assert_eq!(run(&cmux), (json!("cmux"), json!(cmux[0].1)));
+    assert_eq!(run(&[("HC_TERMINAL_ID", "host/t1")]), (Value::Null, Value::Null));
+}
