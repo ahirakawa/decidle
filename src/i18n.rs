@@ -203,7 +203,7 @@ const EN: &[(&str, &str)] = &[
     ("note.instruction", "## One line for Home (decidle)\n\
 End every reply with one line for the Home page: \"Home: yes <note>\" or \"Home: no <note>\".\n\
 - yes: a human needs to act (decide, check, reply or allow). no: nothing to do (a finished report, or only waiting for background work).\n\
-- Keep the note within 60 characters. Say what you are waiting for or what you finished. Examples: \"Home: yes waiting for a review\" \"Home: no reported that the tests pass\"\n\
+- Keep the note within 120 characters. Say what you are waiting for or what you finished. Examples: \"Home: yes waiting for a review\" \"Home: no reported that the tests pass\"\n\
 - This line is shown on the Home page. The rest of the reply is not stored."),
     ("note.yes", "yes"),
     ("note.no", "no"),

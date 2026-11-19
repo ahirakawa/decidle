@@ -1211,6 +1211,51 @@ fn codex_english_block_feedback_does_not_count() {
     assert_eq!(codex_stop(&sb, &t, "Only a reply."), "");
 }
 
+/// Passed without a block: the hook printed only the report page message.
+fn english_passed(out: &str) {
+    let v: Value = serde_json::from_str(out).unwrap_or_else(|_| panic!("not JSON: {out:?}"));
+    assert!(v.get("decision").is_none(), "{out}");
+    assert!(v["systemMessage"].as_str().unwrap().contains("file://"), "{out}");
+}
+
+#[test]
+fn english_limits_are_twice_the_japanese_ones() {
+    let decision = |q: &str| {
+        json!([{"question": q, "options": [{"label": "A", "effect": "a"}, {"label": "B", "effect": "b"}], "recommend": "A", "reason": "r"}])
+    };
+    let run = |question_len: usize, conclusion_len: usize, reply_len: usize| {
+        let sb = Sandbox::new();
+        english(&sb);
+        let mut body = english_report(decision(&"q".repeat(question_len)), json!([{"path": "notes.md", "summary": "Added steps."}]));
+        body["conclusion"] = json!("c".repeat(conclusion_len));
+        let r = sb.report(&body);
+        let t = sb.transcript(&[edit(&sb.file("notes.md")), r]);
+        sb.stop_with_reply(&t, &"r".repeat(reply_len), "p1")
+    };
+    english_passed(&run(80, 400, 800));
+    let why = reason(&run(81, 400, 800));
+    assert!(why.contains("question has 81 characters") && why.contains("within 80"), "{why}");
+    let why = reason(&run(80, 401, 800));
+    assert!(why.contains("conclusion has 401 characters. Keep it within 400"), "{why}");
+    let why = reason(&run(80, 400, 801));
+    assert!(why.contains("terminal has 801 characters. Keep it within 800"), "{why}");
+}
+
+#[test]
+fn limits_written_in_the_config_are_used_as_they_are_in_english() {
+    let sb = Sandbox::new();
+    fs::write(
+        sb.home.join(".config/decidle/config.json"),
+        r#"{"language": "en", "edited_files_threshold": 1, "tool_call_threshold": 8, "ignore_path_patterns": ["/ignored/", ".decidle/"], "question_max_chars": 40}"#,
+    )
+    .unwrap();
+    let decisions = json!([{"question": "q".repeat(41), "options": [{"label": "A", "effect": "a"}, {"label": "B", "effect": "b"}], "recommend": "A", "reason": "r"}]);
+    let r = sb.report(&english_report(decisions, json!([{"path": "notes.md", "summary": "Added steps."}])));
+    let t = sb.transcript(&[edit(&sb.file("notes.md")), r]);
+    let why = reason(&sb.stop_with_reply(&t, "Done.", "p1"));
+    assert!(why.contains("question has 41 characters") && why.contains("within 40"), "{why}");
+}
+
 #[test]
 fn other_languages_are_a_config_error() {
     let sb = Sandbox::new();

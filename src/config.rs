@@ -87,15 +87,26 @@ impl Config {
                 }
             }
         }
-        // review_marker is written by the agent, so its default follows the language.
+        // review_marker is written by the agent, so its default follows the language. So do the
+        // length limits: English takes about twice the characters of Japanese for the same content.
+        // A value the user wrote is used as it is, in either language.
         if let Some(base) = merged.as_object_mut() {
+            let lang: Lang = base
+                .get("language")
+                .map(|v| Lang::deserialize(v).map_err(|e| format!("config: language: {e}")))
+                .transpose()?
+                .unwrap_or_default();
             if !base.contains_key("review_marker") {
-                let lang: Lang = base
-                    .get("language")
-                    .map(|v| Lang::deserialize(v).map_err(|e| format!("config: language: {e}")))
-                    .transpose()?
-                    .unwrap_or_default();
                 base.insert("review_marker".into(), i18n::t(lang, "review_marker").into());
+            }
+            let scale = match lang {
+                Lang::Ja => 1,
+                Lang::En => 2,
+            };
+            for (key, ja_default) in [("conclusion_max_chars", 200), ("question_max_chars", 40), ("reply_max_chars", 400)] {
+                if !base.contains_key(key) {
+                    base.insert(key.into(), (ja_default * scale).into());
+                }
             }
         }
         let mut cfg: Config = serde_json::from_value(merged).map_err(|e| format!("config: {e}"))?;
