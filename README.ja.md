@@ -14,9 +14,9 @@ Claude Code の Stop hook。エージェントに報告を JSON で書かせ、�
 
    ソースを直したときも、同じコマンドで入れ直す。入れ直すまで、hook が呼ぶバイナリは変わらない。
 
-2. `~/.claude/settings.json` の `hooks` に、`docs/settings-snippet.json` の項目を足す。どの hook も `~/.local/bin/decidle` を直接呼ぶ。Stop は `decidle stop` で報告を点検し、それ以外の SessionStart、UserPromptSubmit、Notification、SessionEnd は `decidle event` で Home ページの記録に使う。SessionStart の hook は、返事の最後に Home 用の一言を書く指示をエージェントの文脈に足す。
+2. `~/.claude/settings.json` の `hooks` に、`docs/settings-snippet.json` の項目を足す。どの hook も `~/.local/bin/decidle` を直接呼ぶ。Stop は `decidle stop` で報告を点検する。すべてのツールの PostToolUse は `decidle hint` を呼び、ターンに報告が要るとわかった時点で報告の書き方をエージェントに1回渡す。Stop で差し戻される前に報告を書かせるため。SessionStart、UserPromptSubmit、Notification、SessionEnd と、AskUserQuestion の PreToolUse と PostToolUse は、`decidle event` で Home ページの記録に使う。SessionStart の hook は、返事の最後に Home 用の一言を書く指示をエージェントの文脈に足す。
 
-3. Maestri を使うなら、Maestri のターミナルで、このフォルダからロールを登録する。
+3. Maestri を使うときだけ、Maestri のターミナルで、このフォルダからロールを登録する。
 
    ```
    ./install-roles.sh
@@ -32,6 +32,42 @@ Codex CLI(0.169 で試した)でも、同じバイナリで報告の点検と Ho
 2. codex の中で `/hooks` を開き、足した hook を信頼する。信頼するまで、hook は動かない。
 
 Codex では、許可待ちを PermissionRequest で、承認の拒否と中断を Interrupt で記録する。中断のあとのセッションは表から消える。限界(承認を許可したあとの流れ、圧縮、再開、subagent を待たずに止まった場合などは試していない)は `docs/spec-home.md` の「Codex CLI」の節にある。
+
+## Herdr で使う
+
+decidle は、hook の環境変数からセッションの端末を見分ける。`HERDR_PANE_ID`(Herdr TUI)、`HC_TERMINAL_ID`(Herdr アプリ)、`CMUX_SURFACE_ID`(cmux)の順に見る。端末が記録されていれば、Home から端末を前に出したり、答えを送ったりできる。このための設定は要らない。
+
+### Herdr アプリに Home を出す
+
+`herdr-mod/decidle/` の mod は、Herdr アプリのターミナルの右に Home の一覧を出す。アプリの mod のフォルダにコピーする。
+
+```sh
+mkdir -p ~/.config/herdr-app/mods/decidle
+cp herdr-mod/decidle/main.js herdr-mod/decidle/mod.json ~/.config/herdr-app/mods/decidle/
+herdr-app check ~/.config/herdr-app/mods/decidle
+```
+
+コピーするとアプリが読み込む。消すときは `~/.config/herdr-app/mods/decidle/` を消す。このリポジトリを更新したら、もう一度コピーする。詳しくは `herdr-mod/decidle/README.md` にある。
+
+### `decidle serve` を起動する
+
+mod もブラウザの Home も `decidle serve` を読むので、動かしたままにしておく。Herdr アプリのターミナルで起動する。
+
+```sh
+~/.local/bin/decidle serve
+```
+
+「端末へ行く」のあと、サーバーは自分を起動したアプリを前に出す。Herdr アプリのターミナルで起動すれば、それは Herdr アプリになる。mod は、ポートを設定の `home_port` から、合言葉を `~/.local/share/decidle/home.token` から読む。合言葉はサーバーが起動のたびに書く。
+
+### 設定
+
+Maestri から Herdr に移るときに、変える設定はない。Maestri 用の設定は、Maestri の外では何もしない。
+
+- `portal_command` は既定で空なので、portal は開かない。
+- `trigger_commands`(`maestri ask`)は、ターンで `maestri ask` を実行したときだけ報告を求める。
+- `role_dir_marker`、`review_command`、`review_marker` は、Maestri のロールで起動したセッションにだけ効く。オーケストレーター役のレビューの手順は、Maestri の外にはない。
+
+`./install-roles.sh` も要らない。
 
 ## 使い方
 

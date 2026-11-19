@@ -26,9 +26,9 @@ The value is `en` (default) or `ja`. The server, the hooks, the report pages, th
 
    Run the same command after you change the source. Hooks keep calling the old binary until you reinstall.
 
-2. Add the entries in `docs/settings-snippet.json` to `hooks` in `~/.claude/settings.json`. Every hook calls `~/.local/bin/decidle` directly. Stop runs `decidle stop` to check the report. SessionStart, UserPromptSubmit, Notification, and SessionEnd run `decidle event` to record sessions for the Home page. The SessionStart hook also tells the agent to end its reply with a one-line note for Home.
+2. Add the entries in `docs/settings-snippet.json` to `hooks` in `~/.claude/settings.json`. Every hook calls `~/.local/bin/decidle` directly. Stop runs `decidle stop` to check the report. PostToolUse for every tool runs `decidle hint`, which hands the report format to the agent once a turn needs a report, so that it writes the report before the Stop hook sends it back. SessionStart, UserPromptSubmit, Notification, SessionEnd, and PreToolUse and PostToolUse for AskUserQuestion run `decidle event` to record sessions for the Home page. The SessionStart hook also tells the agent to end its reply with a one-line note for Home.
 
-3. If you use Maestri, register the roles from this folder in a Maestri terminal. It installs the role files for the `language` setting.
+3. Only if you use Maestri, register the roles from this folder in a Maestri terminal. It installs the role files for the `language` setting.
 
    ```
    ./install-roles.sh
@@ -44,6 +44,42 @@ Codex CLI (tested with 0.169) can use the same binary for report checks and Home
 2. In codex, open `/hooks` and trust the hooks you added. They do not run until you trust them.
 
 In Codex, waiting for permission is recorded from PermissionRequest, and denied approvals and interrupts from Interrupt. A session disappears from the table after an interrupt. Limits (not tested: the flow after you allow an approval, compaction, resume, stopping without waiting for a subagent, and more) are in the "Codex CLI" section of `docs/spec-home.md` (Japanese).
+
+## Use with Herdr
+
+decidle finds the terminal of a session from the environment of the hook: `HERDR_PANE_ID` (Herdr TUI), `HC_TERMINAL_ID` (Herdr app), or `CMUX_SURFACE_ID` (cmux), in this order. With a recorded terminal, Home can bring the terminal to the front and send an answer to it. Nothing needs to be set for this.
+
+### Show Home in the Herdr app
+
+The mod in `herdr-mod/decidle/` shows the Home list on the right of the Herdr app's terminals. Copy it into the app's mods folder:
+
+```sh
+mkdir -p ~/.config/herdr-app/mods/decidle
+cp herdr-mod/decidle/main.js herdr-mod/decidle/mod.json ~/.config/herdr-app/mods/decidle/
+herdr-app check ~/.config/herdr-app/mods/decidle
+```
+
+The app loads it after the copy. To remove it, delete `~/.config/herdr-app/mods/decidle/`. Copy the files again after you update this repository. Details are in `herdr-mod/decidle/README.md` (Japanese).
+
+### Start `decidle serve`
+
+The mod and the browser Home both read `decidle serve`, so keep it running. Start it in a terminal of the Herdr app:
+
+```sh
+~/.local/bin/decidle serve
+```
+
+After "go to terminal", the server brings the app it was started from to the front. Started in a Herdr app terminal, that is the Herdr app. The mod reads the port from `home_port` and the token from `~/.local/share/decidle/home.token`, which the server writes at every start.
+
+### Settings
+
+Nothing needs to change when you move from Maestri to Herdr. The Maestri settings do nothing outside Maestri:
+
+- `portal_command` is empty by default, so no portal is opened.
+- `trigger_commands` (`maestri ask`) asks for a report only when a turn runs `maestri ask`.
+- `role_dir_marker`, `review_command` and `review_marker` apply only to sessions started with a Maestri role. The review step of the orchestrator role does not exist outside Maestri.
+
+You do not need `./install-roles.sh` either.
 
 ## Usage
 
