@@ -12,6 +12,7 @@ use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use super::note::{self, Attention};
+use crate::i18n::Lang;
 use super::agent;
 use super::procinfo;
 
@@ -383,9 +384,9 @@ fn line_for(input: &HookInput) -> Option<Map<String, Value>> {
 }
 
 /// The hook's stdout for SessionStart: the instruction for the `Home:` line, as additional context.
-pub fn session_start_output() -> String {
+pub fn session_start_output(lang: Lang) -> String {
     json!({
-        "hookSpecificOutput": { "hookEventName": "SessionStart", "additionalContext": note::INSTRUCTION }
+        "hookSpecificOutput": { "hookEventName": "SessionStart", "additionalContext": note::instruction(lang) }
     })
     .to_string()
 }
@@ -410,8 +411,9 @@ fn record(path: &Path, stdin: &mut dyn Read) -> (bool, Result<(), String>) {
 
 /// `decidle event`. Never fails: the exit code is always 0. Only SessionStart prints, and it
 /// prints the additional context even when the append fails. Other hooks print nothing, because
-/// the UserPromptSubmit hook would add stdout to the agent's context.
-pub fn run_hook() -> i32 {
+/// the UserPromptSubmit hook would add stdout to the agent's context. `lang` is the configured
+/// language of the instruction.
+pub fn run_hook(lang: Lang) -> i32 {
     let path = events_path();
     let result = std::panic::catch_unwind(|| record(&path, &mut io::stdin()));
     let start = match result {
@@ -426,7 +428,7 @@ pub fn run_hook() -> i32 {
         }
     };
     if start {
-        println!("{}", session_start_output());
+        println!("{}", session_start_output(lang));
     }
     0
 }

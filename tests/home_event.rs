@@ -16,7 +16,9 @@ fn temp_home() -> PathBuf {
     let n = COUNTER.fetch_add(1, Ordering::SeqCst);
     let dir = std::env::temp_dir().join(format!("decidle-home-event-{}-{n}", std::process::id()));
     let _ = fs::remove_dir_all(&dir);
-    fs::create_dir_all(&dir).unwrap();
+    // The existing wording is checked in Japanese.
+    fs::create_dir_all(dir.join(".config/decidle")).unwrap();
+    fs::write(dir.join(".config/decidle/config.json"), r#"{"language": "ja"}"#).unwrap();
     dir
 }
 
@@ -28,6 +30,7 @@ fn hook(home: &Path, input: &str) -> Output {
     let mut child = Command::new(env!("CARGO_BIN_EXE_decidle"))
         .arg("event")
         .env("HOME", home)
+        .env_remove("DECIDLE_CONFIG")
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
@@ -207,13 +210,13 @@ fn session_start_gives_the_home_line_instruction_as_additional_context() {
     };
     let out = hook(&home, &start("startup").to_string());
     assert_eq!(out.status.code(), Some(0));
-    assert_eq!(context(&out), decidle::home::note::INSTRUCTION);
+    assert_eq!(context(&out), ja());
     assert_eq!(lines(&home).len(), 1);
 
     // After a compaction the instruction is given again, but no start line is appended:
     // the same claude keeps running, and a start would hide the session.
     let out = hook(&home, &start("compact").to_string());
-    assert_eq!(context(&out), decidle::home::note::INSTRUCTION);
+    assert_eq!(context(&out), ja());
     assert_eq!(lines(&home).len(), 1);
 
     // When the append fails, the instruction is still given.
@@ -221,7 +224,31 @@ fn session_start_gives_the_home_line_instruction_as_additional_context() {
     fs::create_dir_all(log_of(&home)).unwrap();
     let out = hook(&home, &start("startup").to_string());
     assert_eq!(out.status.code(), Some(0));
-    assert_eq!(context(&out), decidle::home::note::INSTRUCTION);
+    assert_eq!(context(&out), ja());
+}
+
+fn ja() -> &'static str {
+    decidle::home::note::instruction(decidle::i18n::Lang::Ja)
+}
+
+#[test]
+fn session_start_follows_the_configured_language() {
+    let home = temp_home();
+    let start = json!({"session_id": "s", "cwd": "/w", "hook_event_name": "SessionStart", "source": "startup"}).to_string();
+    let japanese = |c: char| matches!(c, '\u{3040}'..='\u{30ff}' | '\u{3400}'..='\u{9fff}' | '\u{ff00}'..='\u{ffef}');
+    let en = decidle::home::note::instruction(decidle::i18n::Lang::En);
+    for config in [Some(r#"{"language": "en"}"#), None] {
+        let path = home.join(".config/decidle/config.json");
+        match config {
+            Some(text) => fs::write(&path, text).unwrap(),
+            None => fs::remove_file(&path).unwrap(),
+        }
+        let out = hook(&home, &start);
+        let text = String::from_utf8(out.stdout).unwrap();
+        let v: Value = serde_json::from_str(&text).unwrap();
+        assert_eq!(v["hookSpecificOutput"]["additionalContext"], en, "{config:?}");
+        assert!(!text.chars().any(japanese), "{text}");
+    }
 }
 
 #[test]

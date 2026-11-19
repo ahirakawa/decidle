@@ -15,6 +15,7 @@ herdr-app check ~/.config/herdr-app/mods/decidle
 ## 使うもの
 
 - `decidle serve` が動いていること。ポートは `~/.config/decidle/config.json` の `home_port` から読み、無ければ 7878 を使う。
+- 画面の言葉は、`/api/sessions` の `lang`(設定の `language`)に従う。サーバーが一度も答えていないあいだは、設定の既定値と同じ英語で出す。
 - 答えと外すには、サーバーが起動のたびに書く `~/.local/share/decidle/home.token` が要る。
 
 ## 確かめ方

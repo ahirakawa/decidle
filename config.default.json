@@ -1,4 +1,5 @@
 {
+  "language": "en",
   "report_dir": ".decidle",
   "report_suffix": ".report.json",
   "conclusion_max_chars": 200,
@@ -42,7 +43,6 @@
   ],
   "role_dir_marker": "/.maestri/roles/",
   "review_command": "maestri ask",
-  "review_marker": "報告の点検:",
   "verification_rules": [
     {
       "words": [
@@ -78,7 +78,8 @@
   "agent_prompt_markers": [
     "maestri ask",
     "Terminal #",
-    "報告の点検:"
+    "報告の点検:",
+    "Report review:"
   ],
   "portal_command": "",
   "home_port": 7878,

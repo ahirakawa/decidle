@@ -1,6 +1,7 @@
 //! The Home server: /api/sessions on a prepared events.jsonl, the 403 checks, resolve and kill.
 
 use decidle::home::{events, procinfo, server::{self, Server}};
+use decidle::i18n::Lang;
 use serde_json::{json, Value};
 use std::fs;
 use std::io::{Read, Write};
@@ -27,7 +28,7 @@ fn ts_ago(secs: u64) -> String {
 
 /// Starts a server on a free port and returns the port and the token from the page.
 fn start(log: &PathBuf) -> (u16, String) {
-    let server = Server::bind(0, log.clone()).unwrap();
+    let server = Server::bind(0, log.clone(), Lang::Ja).unwrap();
     let port = server.port();
     std::thread::spawn(move || server.run());
     let (status, page) = request(port, "GET", "/", &[], "");
@@ -225,7 +226,7 @@ fn forged_requests_are_403() {
 fn taken_port_is_an_error() {
     let taken = TcpListener::bind(("127.0.0.1", 0)).unwrap();
     let port = taken.local_addr().unwrap().port();
-    assert!(Server::bind(port, temp_dir().join("events.jsonl")).is_err());
+    assert!(Server::bind(port, temp_dir().join("events.jsonl"), Lang::Ja).is_err());
 }
 
 /// A process whose name is claude: sleep run through a symlink named claude.
@@ -599,7 +600,7 @@ fn refuse_call(_: &[String]) -> Result<String, String> {
 
 /// Like `start`, with the terminal commands replaced.
 fn start_with(log: &PathBuf, runner: fn(&[String]) -> Result<String, String>) -> (u16, String) {
-    let mut server = Server::bind(0, log.clone()).unwrap();
+    let mut server = Server::bind(0, log.clone(), Lang::Ja).unwrap();
     server.set_runner(runner);
     let port = server.port();
     std::thread::spawn(move || server.run());
@@ -886,7 +887,7 @@ fn the_token_file_holds_this_start_s_token_for_the_owner_only() {
     let path = dir.join("share/home.token");
     let write_log_line = |sid: &str| write_log(&log, &[(sid, "start", json!({}))], SystemTime::now());
 
-    let first = Server::bind(0, log.clone()).unwrap();
+    let first = Server::bind(0, log.clone(), Lang::Ja).unwrap();
     first.write_token(&path).unwrap();
     let old = fs::read_to_string(&path).unwrap();
     assert_eq!(old.len(), 64);
@@ -896,7 +897,7 @@ fn the_token_file_holds_this_start_s_token_for_the_owner_only() {
     // A later start replaces the file; the token from the file is the one the server takes, in
     // the header, with the same Origin check as the page.
     let ts = write_log_line("s");
-    let server = Server::bind(0, log.clone()).unwrap();
+    let server = Server::bind(0, log.clone(), Lang::Ja).unwrap();
     server.write_token(&path).unwrap();
     let port = server.port();
     std::thread::spawn(move || server.run());
@@ -934,7 +935,7 @@ fn focus_raises_the_terminal_app_and_answer_does_not() {
         ],
         base,
     );
-    let mut server = Server::bind(0, log.clone()).unwrap();
+    let mut server = Server::bind(0, log.clone(), Lang::Ja).unwrap();
     server.set_runner(record_raise);
     server.set_host_app(Some("com.example.term".into()));
     let port = server.port();
@@ -1184,4 +1185,75 @@ fn an_option_is_pressed_once_and_only_into_an_open_single_choice_question() {
     assert_eq!(status, 502, "{out}");
     assert_eq!(count_of(&log, "choose"), 2);
     assert_eq!(row("fail")["state"], json!("working"));
+}
+
+fn has_japanese(text: &str) -> bool {
+    text.chars().any(|c| matches!(c, '\u{3040}'..='\u{30ff}' | '\u{4e00}'..='\u{9fff}'))
+}
+
+/// Starts a server in `lang` and returns the port, the token and the page.
+fn start_in(log: &std::path::Path, lang: Lang) -> (u16, String, String) {
+    let server = Server::bind(0, log.to_path_buf(), lang).unwrap();
+    let port = server.port();
+    std::thread::spawn(move || server.run());
+    let (status, page) = request(port, "GET", "/", &[], "");
+    assert_eq!(status, 200);
+    let marker = "name=\"decidle-token\" content=\"";
+    let at = page.find(marker).unwrap() + marker.len();
+    (port, page[at..at + 64].to_string(), page)
+}
+
+/// The words table the server embeds in the page.
+fn words_of(page: &str) -> serde_json::Map<String, Value> {
+    let open = "<script id=\"words\" type=\"application/json\">";
+    let at = page.find(open).unwrap() + open.len();
+    let end = at + page[at..].find("</script>").unwrap();
+    serde_json::from_str::<Value>(&page[at..end]).unwrap().as_object().unwrap().clone()
+}
+
+#[test]
+fn the_page_and_the_sessions_carry_the_configured_language() {
+    let dir = temp_dir();
+    let log = dir.join("events.jsonl");
+    let (ja_port, _, ja_page) = start_in(&log, Lang::Ja);
+    let (en_port, _, en_page) = start_in(&log, Lang::En);
+    assert!(ja_page.contains("<html lang=\"ja\">"));
+    assert!(en_page.contains("<html lang=\"en\">"));
+    assert_eq!(sessions(ja_port)["lang"], "ja");
+    assert_eq!(sessions(en_port)["lang"], "en");
+
+    let (ja, en) = (words_of(&ja_page), words_of(&en_page));
+    let names = |m: &serde_json::Map<String, Value>| m.keys().cloned().collect::<std::collections::BTreeSet<_>>();
+    assert_eq!(names(&ja), names(&en));
+    assert_eq!(ja["title"], "あなた待ち");
+    for (k, v) in &en {
+        assert!(!has_japanese(v.as_str().unwrap()), "{k}: {v}");
+    }
+    // Outside the table, the English page holds no Japanese either.
+    assert!(!has_japanese(&en_page.replace(&serde_json::to_string(&en).unwrap(), "")), "{en_page}");
+}
+
+#[test]
+fn replies_are_in_the_configured_language() {
+    let dir = temp_dir();
+    let log = dir.join("events.jsonl");
+    write_log(&log, &[("s", "start", json!({}))], SystemTime::now());
+    let (ja_port, ja_token, _) = start_in(&log, Lang::Ja);
+    let (en_port, en_token, _) = start_in(&log, Lang::En);
+    let unknown = json!({"session_id": "nobody"});
+
+    let (status, out) = post(ja_port, "/api/focus", &ja_token, &unknown);
+    assert_eq!((status, error_of(&out).as_str()), (404, "そのセッションの記録がない"));
+    let (status, out) = post(en_port, "/api/focus", &en_token, &unknown);
+    assert_eq!((status, error_of(&out).as_str()), (404, "no record of that session"));
+
+    let (status, out) = post(ja_port, "/api/resolve", &ja_token, &json!({}));
+    assert_eq!((status, error_of(&out).as_str()), (400, "session_id と resolves が要る"));
+    let (status, out) = post(en_port, "/api/resolve", &en_token, &json!({}));
+    assert_eq!((status, error_of(&out).as_str()), (400, "session_id and resolves are required"));
+
+    // A session with no terminal refuses focus and answer in English, with no Japanese.
+    let (status, out) = post(en_port, "/api/focus", &en_token, &json!({"session_id": "s"}));
+    assert_eq!(status, 409);
+    assert!(!has_japanese(&out), "{out}");
 }

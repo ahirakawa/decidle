@@ -11,6 +11,7 @@ use std::path::{Path, PathBuf};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use super::read;
+use crate::i18n::{self, Lang};
 use super::state::{self, Event, Kind, Session, St};
 
 const DAY_US: i64 = 24 * 3600 * 1_000_000;
@@ -24,6 +25,8 @@ pub struct Settings {
     pub unanswered_after_days: u64,
     /// The folder name the reports live in (config `report_dir`, `.decidle` by default).
     pub report_dir: String,
+    /// Language of the reasons and of what `report` writes.
+    pub lang: Lang,
 }
 
 /// A recorded path that the records allow to delete, with the time the last of the sessions
@@ -126,32 +129,33 @@ pub fn candidates(events: &[Event], now_us: i64, after_us: Option<i64>, unanswer
 /// and its parents must not be symbolic links (the real path equals the recorded one), the file
 /// must be a regular file ending in .json or .html, and it must not have been written after the
 /// last recording session closed (someone wrote it again, for a newer report).
-pub fn refusal(c: &Candidate, report_dir: &str) -> Option<String> {
+pub fn refusal(c: &Candidate, report_dir: &str, lang: Lang) -> Option<String> {
+    let say = |key: &str| Some(i18n::t(lang, key).to_string());
     let p = c.path.as_str();
     if !p.starts_with('/') || p[1..].split('/').any(|s| s.is_empty() || s == "." || s == "..") {
-        return Some("絶対パスの形でない".into());
+        return say("clean.not_absolute");
     }
     let path = Path::new(p);
     let (Some(parent), Some(name)) = (path.parent(), path.file_name().and_then(|n| n.to_str())) else {
-        return Some("フォルダかファイル名がない".into());
+        return say("clean.no_name");
     };
     if parent.file_name().and_then(|n| n.to_str()) != Some(report_dir) {
-        return Some(format!("{report_dir}/ の中でない"));
+        return Some(i18n::f(lang, "clean.not_in_dir", &[("dir", report_dir)]));
     }
     if !(name.ends_with(".json") || name.ends_with(".html")) {
-        return Some(".json か .html でない".into());
+        return say("clean.not_report");
     }
     match fs::canonicalize(parent) {
         Ok(real) if real == parent => {}
-        Ok(_) => return Some("途中にシンボリックリンクがある".into()),
-        Err(e) => return Some(format!("フォルダを確かめられない: {e}")),
+        Ok(_) => return say("clean.symlink"),
+        Err(e) => return Some(i18n::f(lang, "clean.folder_unchecked", &[("e", &e.to_string())])),
     }
     let meta = match fs::symlink_metadata(path) {
         Ok(m) => m,
-        Err(e) => return Some(format!("ファイルを確かめられない: {e}")),
+        Err(e) => return Some(i18n::f(lang, "clean.file_unchecked", &[("e", &e.to_string())])),
     };
     if !meta.file_type().is_file() {
-        return Some("普通のファイルでない".into());
+        return say("clean.not_file");
     }
     let mtime_us = meta
         .modified()
@@ -159,7 +163,7 @@ pub fn refusal(c: &Candidate, report_dir: &str) -> Option<String> {
         .and_then(|t| t.duration_since(UNIX_EPOCH).ok())
         .map_or(i64::MAX, |d| d.as_micros() as i64);
     if mtime_us > c.closed_us {
-        return Some("セッションが終わったあとに書き直されている".into());
+        return say("clean.rewritten");
     }
     None
 }
@@ -188,7 +192,7 @@ pub fn run(events_path: &Path, settings: &Settings, dry_run: bool) -> Result<Out
         if fs::symlink_metadata(&path).is_err_and(|e| e.kind() == io::ErrorKind::NotFound) {
             continue;
         }
-        if let Some(reason) = refusal(&c, &settings.report_dir) {
+        if let Some(reason) = refusal(&c, &settings.report_dir, settings.lang) {
             out.refused.push((path, reason));
             continue;
         }
@@ -197,7 +201,7 @@ pub fn run(events_path: &Path, settings: &Settings, dry_run: bool) -> Result<Out
                 Ok(()) => {}
                 Err(e) if e.kind() == io::ErrorKind::NotFound => continue,
                 Err(e) => {
-                    out.refused.push((path, format!("消せない: {e}")));
+                    out.refused.push((path, i18n::f(settings.lang, "clean.cannot_delete", &[("e", &e.to_string())])));
                     continue;
                 }
             }
@@ -210,28 +214,28 @@ pub fn run(events_path: &Path, settings: &Settings, dry_run: bool) -> Result<Out
 /// Runs once and writes the result to stderr. Used by `decidle serve`.
 pub fn run_and_report(events_path: &Path, settings: &Settings) {
     match run(events_path, settings, false) {
-        Ok(o) => report(&o, false),
+        Ok(o) => report(&o, false, settings.lang),
         Err(e) => eprintln!("decidle clean: {e}"),
     }
 }
 
 /// Deleted paths and their count, and refused paths with the reason, to stderr.
 /// With dry_run the paths that would be deleted go to stdout, one per line.
-pub fn report(o: &Outcome, dry_run: bool) {
+pub fn report(o: &Outcome, dry_run: bool, lang: Lang) {
     for (p, why) in &o.refused {
-        eprintln!("decidle clean: 消さない {}: {why}", p.display());
+        eprintln!("{}", i18n::f(lang, "clean.refused", &[("path", &p.display().to_string()), ("why", why)]));
     }
     if dry_run {
         for p in &o.deleted {
             println!("{}", p.display());
         }
-        eprintln!("decidle clean: 消すもの {} 件(--dry-run なので消していない)", o.deleted.len());
+        eprintln!("{}", i18n::f(lang, "clean.dry_run", &[("n", &o.deleted.len().to_string())]));
     } else {
         for p in &o.deleted {
-            eprintln!("decidle clean: 消した {}", p.display());
+            eprintln!("{}", i18n::f(lang, "clean.deleted_one", &[("path", &p.display().to_string())]));
         }
         if !o.deleted.is_empty() {
-            eprintln!("decidle clean: {} 件を消した", o.deleted.len());
+            eprintln!("{}", i18n::f(lang, "clean.deleted", &[("n", &o.deleted.len().to_string())]));
         }
     }
 }

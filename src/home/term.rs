@@ -5,6 +5,7 @@ use std::io;
 use std::process::{Command, Stdio};
 
 use super::state::{Session, St};
+use crate::i18n::Lang;
 
 /// What the SessionStart hook records about the terminal.
 #[derive(Debug, PartialEq, Eq)]
@@ -57,8 +58,25 @@ pub fn checked(
     }
 }
 
-/// The first word of every answer line.
-pub const ANSWER_PREFIX: &str = "回答:";
+/// The answer line by language: the first word of every line, and one question with its
+/// recommended option, where `{q}` and `{r}` are filled in, and the marks taken off the end of a
+/// question. Neither text holds a character `plain` refuses, so the line stays plain when the
+/// question and the option are.
+struct AnswerWords {
+    prefix: &'static str,
+    part: &'static str,
+    trim: &'static [char],
+}
+
+const ANSWER_JA: AnswerWords = AnswerWords { prefix: "回答:", part: "{q}は「{r}」で進めて。", trim: &['?', '？', '。'] };
+const ANSWER_EN: AnswerWords = AnswerWords { prefix: "Answer:", part: "{q}: go with “{r}”.", trim: &['?', '？', '。', '.'] };
+
+fn answer_words(lang: Lang) -> &'static AnswerWords {
+    match lang {
+        Lang::Ja => &ANSWER_JA,
+        Lang::En => &ANSWER_EN,
+    }
+}
 
 /// Characters that a shell or the terminal's own escapes would act on. The text is typed into
 /// the agent's prompt, but if the agent died in the last moment a shell reads it instead.
@@ -67,8 +85,9 @@ fn plain(text: &str) -> bool {
 }
 
 /// The one line the answer button types: built from the stop line only, never from the request.
-/// None when a decision has no recommended option, or the text is not plain.
-pub fn answer_text(s: &Session) -> Option<String> {
+/// None when a decision has no recommended option, or the text is not plain. Written in `lang`.
+pub fn answer_text(s: &Session, lang: Lang) -> Option<String> {
+    let w = answer_words(lang);
     if s.questions.is_empty() || s.questions.len() != s.recommends.len() {
         return None;
     }
@@ -76,13 +95,13 @@ pub fn answer_text(s: &Session) -> Option<String> {
         .questions
         .iter()
         .zip(&s.recommends)
-        .map(|(q, r)| format!("{}は「{}」で進めて。", q.trim_end_matches(['?', '？', '。']), r))
+        .map(|(q, r)| crate::i18n::fill(w.part, &[("q", q.trim_end_matches(w.trim)), ("r", r)]))
         .collect();
     let ok = s.questions.iter().chain(&s.recommends).all(|t| plain(t));
     // The line starts with a fixed word. If the agent died in the last moment and a shell reads
     // the line, the shell looks for a command of this name and finds none; without it, the
     // first word of the agent's question would be run as a command.
-    ok.then(|| format!("{ANSWER_PREFIX} {}", parts.join(" ")))
+    ok.then(|| format!("{} {}", w.prefix, parts.join(" ")))
 }
 
 fn arg(flag: &str, value: &str) -> [String; 2] {
@@ -216,9 +235,38 @@ pub fn choose_command(s: &Session, option: usize) -> Option<Vec<String>> {
 
 const RUN_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(2);
 
-/// Runs one command without a shell and returns its stdout. Err carries what to tell the human.
-pub fn run(argv: &[String]) -> Result<String, String> {
-    let (program, args) = argv.split_first().ok_or("空の命令")?;
+/// What `run` tells the human when a command fails, by language. `{program}` and `{secs}` are
+/// filled in.
+struct RunWords {
+    empty: &'static str,
+    cannot_start: &'static str,
+    timed_out: &'static str,
+}
+
+const RUN_JA: RunWords = RunWords {
+    empty: "空の命令",
+    cannot_start: "{program} を起動できない",
+    timed_out: "{program}: {secs} 秒待っても終わらないので止めた",
+};
+
+const RUN_EN: RunWords = RunWords {
+    empty: "empty command",
+    cannot_start: "cannot start {program}",
+    timed_out: "{program}: stopped after {secs} seconds without finishing",
+};
+
+fn run_words(lang: Lang) -> &'static RunWords {
+    match lang {
+        Lang::Ja => &RUN_JA,
+        Lang::En => &RUN_EN,
+    }
+}
+
+/// Runs one command without a shell and returns its stdout. Err carries what to tell the human,
+/// in `lang`.
+pub fn run(argv: &[String], lang: Lang) -> Result<String, String> {
+    let w = run_words(lang);
+    let (program, args) = argv.split_first().ok_or(w.empty)?;
     let mut child = Command::new(program)
         .args(args)
         .env("CMUX_QUIET", "1")
@@ -226,7 +274,7 @@ pub fn run(argv: &[String]) -> Result<String, String> {
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
         .spawn()
-        .map_err(|e: io::Error| format!("{program} を起動できない: {e}"))?;
+        .map_err(|e: io::Error| format!("{}: {e}", w.cannot_start.replace("{program}", program)))?;
     // Hooks give up on the append lock after a few seconds, so a command that hangs must not
     // keep the server (and the lock) for longer than that.
     let deadline = std::time::Instant::now() + RUN_TIMEOUT;
@@ -234,7 +282,7 @@ pub fn run(argv: &[String]) -> Result<String, String> {
         if std::time::Instant::now() >= deadline {
             let _ = child.kill();
             let _ = child.wait();
-            return Err(format!("{program}: {} 秒待っても終わらないので止めた", RUN_TIMEOUT.as_secs()));
+            return Err(w.timed_out.replace("{secs}", &RUN_TIMEOUT.as_secs().to_string()).replace("{program}", program));
         }
         std::thread::sleep(std::time::Duration::from_millis(20));
     }

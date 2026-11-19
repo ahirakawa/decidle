@@ -2,6 +2,7 @@ use serde_json::Value;
 use std::io::{BufRead, BufReader, Read};
 
 use crate::util::open_regular;
+use decidle::i18n;
 use std::path::Path;
 
 #[derive(PartialEq, Clone, Copy)]
@@ -104,7 +105,7 @@ const MAX_TRANSCRIPT_BYTES: u64 = 256 * 1024 * 1024;
 pub fn load(path: &Path) -> std::io::Result<Vec<Entry>> {
     let file = open_regular(path)?;
     if file.metadata()?.len() > MAX_TRANSCRIPT_BYTES {
-        return Err(std::io::Error::new(std::io::ErrorKind::InvalidData, "大きすぎる"));
+        return Err(std::io::Error::new(std::io::ErrorKind::InvalidData, i18n::t(i18n::current(), "file.too_large")));
     }
     // The limit also holds if the file grows while it is being read.
     let reader = BufReader::new(file.take(MAX_TRANSCRIPT_BYTES));
@@ -138,9 +139,12 @@ pub mod codex {
     use super::{str_field, Entry, Kind, ToolCall};
     use serde_json::Value;
 
-    /// The start of the reason `decidle stop` gives when it blocks. Codex records the reason as a
-    /// user message, so such a message is marked as meta, like Claude Code's "Stop hook feedback".
-    pub const BLOCK_PREFIX: &str = "報告が決まりに合っていない";
+    /// Whether the text starts like the reason `decidle stop` gives when it blocks, in any
+    /// language. Codex records the reason as a user message, so such a message is marked as meta,
+    /// like Claude Code's "Stop hook feedback".
+    pub fn is_block(text: &str) -> bool {
+        decidle::i18n::all("gate.block_prefix").any(|p| text.starts_with(p))
+    }
 
     const TYPES: [&str; 8] = [
         "session_meta",
@@ -300,7 +304,7 @@ pub mod codex {
                         Some("assistant") => {}
                         Some("user") => {
                             entry.kind = Kind::User;
-                            entry.is_meta = entry.text.starts_with(BLOCK_PREFIX);
+                            entry.is_meta = is_block(&entry.text);
                         }
                         _ => return None,
                     }

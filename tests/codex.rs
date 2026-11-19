@@ -34,9 +34,14 @@ fn hook_inputs_are_told_apart_by_the_transcript_path() {
 }
 
 fn hook(home: &Path, input: &Value) -> Output {
+    // The existing wording is checked in Japanese.
+    let config = home.join(".config/decidle/config.json");
+    fs::create_dir_all(config.parent().unwrap()).unwrap();
+    fs::write(&config, r#"{"language": "ja"}"#).unwrap();
     let mut child = Command::new(env!("CARGO_BIN_EXE_decidle"))
         .arg("event")
         .env("HOME", home)
+        .env_remove("DECIDLE_CONFIG")
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
@@ -65,7 +70,7 @@ fn codex_hooks_record_start_prompt_permission_interrupt_and_end() {
     };
     let out = hook(&home, &with(json!({"hook_event_name": "SessionStart", "source": "startup"})));
     let ctx: Value = serde_json::from_slice(&out.stdout).unwrap();
-    assert_eq!(ctx["hookSpecificOutput"]["additionalContext"], decidle::home::note::INSTRUCTION);
+    assert_eq!(ctx["hookSpecificOutput"]["additionalContext"], decidle::home::note::instruction(decidle::i18n::Lang::Ja));
     hook(&home, &with(json!({"hook_event_name": "UserPromptSubmit", "turn_id": "t1", "prompt": "秘密の依頼文"})));
     hook(&home, &with(json!({"hook_event_name": "PermissionRequest", "turn_id": "t1", "tool_name": "Bash",
         "tool_input": {"command": "touch probe.txt", "description": "作る"}})));

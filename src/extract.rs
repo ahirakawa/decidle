@@ -26,7 +26,7 @@ pub fn run(args: &[String]) -> i32 {
     };
     let mut files: Vec<PathBuf> = Vec::new();
     let Ok(projects) = std::fs::read_dir(&projects_dir) else {
-        eprintln!("decidle: {} を読めない", projects_dir.display());
+        eprintln!("{}", decidle::i18n::f(cfg.language, "cli.unreadable", &[("path", &projects_dir.display().to_string())]));
         return 1;
     };
     for project in projects.flatten() {

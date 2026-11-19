@@ -1,4 +1,5 @@
 use crate::check::Report;
+use decidle::i18n::{f, t, Lang};
 
 const TEMPLATE: &str = include_str!("../templates/report.html");
 
@@ -6,9 +7,13 @@ fn esc(s: &str) -> String {
     s.replace('&', "&amp;").replace('<', "&lt;").replace('>', "&gt;").replace('"', "&quot;")
 }
 
-fn folded(title: &str, items: &[String]) -> String {
+fn none(lang: Lang) -> String {
+    format!("<p class=\"none\">{}</p>", t(lang, "page.none"))
+}
+
+fn folded(title: &str, items: &[String], lang: Lang) -> String {
     let body = if items.is_empty() {
-        "<p class=\"none\">なし</p>".to_string()
+        none(lang)
     } else {
         let lis: String = items.iter().map(|i| format!("<li>{}</li>", esc(i))).collect();
         format!("<ul>{lis}</ul>")
@@ -20,16 +25,17 @@ fn folded(title: &str, items: &[String]) -> String {
 }
 
 /// Fills the fixed template. `issues` are problems left after the rejection limit was reached.
-pub fn render(report: &Report, meta: &str, issues: &[String]) -> String {
+/// The page's words are in `lang`; the report's own text is left as the agent wrote it.
+pub fn render(report: &Report, meta: &str, issues: &[String], lang: Lang) -> String {
     let warnings = if issues.is_empty() {
         String::new()
     } else {
         let lis: String = issues.iter().map(|i| format!("<li>{}</li>", esc(i))).collect();
-        format!("<div class=\"warn\">この報告には、点検で残った指摘がある。<ul>{lis}</ul></div>")
+        format!("<div class=\"warn\">{}<ul>{lis}</ul></div>", t(lang, "page.warn"))
     };
 
     let decisions = if report.decisions.is_empty() {
-        "<p class=\"none\">なし</p>".to_string()
+        none(lang)
     } else {
         report
             .decisions
@@ -44,7 +50,7 @@ pub fn render(report: &Report, meta: &str, issues: &[String]) -> String {
                             "<div class=\"option{}\"><span class=\"label\">{}</span>{}<div class=\"effect\">{}</div></div>",
                             if recommended { " recommended" } else { "" },
                             esc(&o.label),
-                            if recommended { "<span class=\"badge\">推奨</span>" } else { "" },
+                            if recommended { format!("<span class=\"badge\">{}</span>", t(lang, "page.recommended")) } else { String::new() },
                             esc(&o.effect)
                         )
                     })
@@ -61,40 +67,47 @@ pub fn render(report: &Report, meta: &str, issues: &[String]) -> String {
     let files: String = report
         .deliverables
         .iter()
-        .map(|f| {
-            let changes: String = f
+        .map(|d| {
+            let changes: String = d
                 .changes
                 .iter()
                 .map(|c| {
                     format!(
-                        "<div class=\"change\"><div><span class=\"k\">{}行目</span></div><div><span class=\"k\">変更前</span>{}</div><div><span class=\"k\">変更後</span>{}</div></div>",
-                        c.line,
+                        "<div class=\"change\"><div><span class=\"k\">{}</span></div><div><span class=\"k\">{}</span>{}</div><div><span class=\"k\">{}</span>{}</div></div>",
+                        f(lang, "page.line", &[("n", &c.line.to_string())]),
+                        t(lang, "page.before"),
                         esc(&c.before),
+                        t(lang, "page.after"),
                         esc(&c.after)
                     )
                 })
                 .collect();
             format!(
                 "<div class=\"file\"><div class=\"path\">{}</div><div class=\"summary\">{}</div>{changes}</div>",
-                esc(&f.path),
-                esc(&f.summary)
+                esc(&d.path),
+                esc(&d.summary)
             )
         })
         .collect();
     let deliverables = format!(
-        "<details><summary>成果物<span class=\"count\">{}</span></summary>{}</details>\n",
+        "<details><summary>{}<span class=\"count\">{}</span></summary>{}</details>\n",
+        t(lang, "page.deliverables"),
         report.deliverables.len(),
-        if files.is_empty() { "<p class=\"none\">なし</p>".to_string() } else { files }
+        if files.is_empty() { none(lang) } else { files }
     );
 
     let details = format!(
         "{}{}{}",
-        folded("確かめていないこと", &report.unverified),
-        folded("確かめたこと", &report.verified),
+        folded(t(lang, "page.unverified"), &report.unverified, lang),
+        folded(t(lang, "page.verified"), &report.verified, lang),
         deliverables
     );
 
     fill(&[
+        ("lang", lang.code()),
+        ("goal_label", t(lang, "page.goal")),
+        ("reason_label", t(lang, "page.reason")),
+        ("decisions_label", t(lang, "page.decisions")),
         ("title", &esc(&report.title)),
         ("meta", &esc(meta)),
         ("warnings", &warnings),

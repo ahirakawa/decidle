@@ -1,61 +1,73 @@
 # decidle
 
-Claude Code の Stop hook。エージェントに報告を JSON で書かせ、決まりと作業記録に合っているかを点検して、合格したら HTML のページにする。人間はターミナルの返事ではなく、そのページを読む。
+[日本語](README.ja.md)
 
-仕組みと決まりは `docs/report-format.md`、Maestri で使うロールは `docs/role-orchestrator.md` と `docs/role-reviewer.md` に書いてある。
+A Stop hook for Claude Code. It makes the agent write its report as JSON, checks the report against the rules and the session transcript, and turns a passing report into an HTML page. You read that page instead of the terminal reply.
 
-## 新しい PC に入れる
+The rules are in `docs/report-format.en.md`. The Maestri roles are in `docs/role-orchestrator.en.md` and `docs/role-reviewer.en.md`.
 
-1. このフォルダでビルドして、`~/.local/bin/decidle` に入れる。Rust が要る。
+## Language
+
+decidle shows its text in English or Japanese. Set `language` in `~/.config/decidle/config.json`:
+
+```json
+{ "language": "ja" }
+```
+
+The value is `en` (default) or `ja`. The server, the hooks, the report pages, the browser Home, and the mod all follow this one setting. Restart `decidle serve` to change the Home screen. Hooks read the setting each time, so they change from the next hook call. Report pages already written keep their language.
+
+## Install on a new machine
+
+1. Build in this folder and install to `~/.local/bin/decidle`. You need Rust.
 
    ```
    cargo install --path . --root ~/.local --locked
    ```
 
-   ソースを直したときも、同じコマンドで入れ直す。入れ直すまで、hook が呼ぶバイナリは変わらない。
+   Run the same command after you change the source. Hooks keep calling the old binary until you reinstall.
 
-2. `~/.claude/settings.json` の `hooks` に、`docs/settings-snippet.json` の項目を足す。どの hook も `~/.local/bin/decidle` を直接呼ぶ。Stop は `decidle stop` で報告を点検し、それ以外の SessionStart、UserPromptSubmit、Notification、SessionEnd は `decidle event` で Home ページの記録に使う。SessionStart の hook は、返事の最後に Home 用の一言を書く指示をエージェントの文脈に足す。
+2. Add the entries in `docs/settings-snippet.json` to `hooks` in `~/.claude/settings.json`. Every hook calls `~/.local/bin/decidle` directly. Stop runs `decidle stop` to check the report. SessionStart, UserPromptSubmit, Notification, and SessionEnd run `decidle event` to record sessions for the Home page. The SessionStart hook also tells the agent to end its reply with a one-line note for Home.
 
-3. Maestri を使うなら、Maestri のターミナルで、このフォルダからロールを登録する。
+3. If you use Maestri, register the roles from this folder in a Maestri terminal. It installs the role files for the `language` setting.
 
    ```
    ./install-roles.sh
    ```
 
-`~/.local/bin/decidle` が無い PC では、どの hook も何もせずに終わる。`hooks/stop_decidle.sh` は settings からは使わない。手で `hooks/stop_decidle.sh render <report.json>` と打って報告のページを書き直すときに使う。
+On a machine without `~/.local/bin/decidle`, every hook exits without doing anything. Settings do not use `hooks/stop_decidle.sh`. Run `hooks/stop_decidle.sh render <report.json>` by hand to rewrite a report page.
 
-## Codex CLI で使う
+## Use with Codex CLI
 
-Codex CLI(0.169 で試した)でも、同じバイナリで報告の点検と Home の記録が動く(SPEC AMENDMENT、2026-11-18 依頼者承認)。
+Codex CLI (tested with 0.169) can use the same binary for report checks and Home records.
 
-1. `docs/codex-hooks-snippet.toml` の中身を `~/.codex/config.toml` の末尾に足す。
-2. codex の中で `/hooks` を開き、足した hook を信頼する。信頼するまで、hook は動かない。
+1. Append `docs/codex-hooks-snippet.toml` to `~/.codex/config.toml`.
+2. In codex, open `/hooks` and trust the hooks you added. They do not run until you trust them.
 
-Codex では、許可待ちを PermissionRequest で、承認の拒否と中断を Interrupt で記録する。中断のあとのセッションは表から消える。限界(承認を許可したあとの流れ、圧縮、再開、subagent を待たずに止まった場合などは試していない)は `docs/spec-home.md` の「Codex CLI」の節にある。
+In Codex, waiting for permission is recorded from PermissionRequest, and denied approvals and interrupts from Interrupt. A session disappears from the table after an interrupt. Limits (not tested: the flow after you allow an approval, compaction, resume, stopping without waiting for a subagent, and more) are in the "Codex CLI" section of `docs/spec-home.md` (Japanese).
 
-## 使い方
+## Usage
 
-- 止めたいターミナルは `DECIDLE_MODE=off claude` で起動する。
-- 点検の記録は `~/.local/share/decidle/gate.jsonl` に残る。`docs/queries.sql` の SQL で集計できる。
-- 報告を求めるのは、編集したファイルが 3 個以上か、ツールの呼び出しが 20 回以上か、`maestri ask` を実行したターンだけ。数は設定の `edited_files_threshold` と `tool_call_threshold` で変えられる。
-- 字数の上限やコード扱いの拡張子は、`config.default.json` と同じ形のファイルを `~/.config/decidle/config.json` に置くと、書いたキーだけ上書きされる。
-- 報告の JSON とページは、作業したフォルダの `.decidle/` にできる。git に入れたくなければ、各自の gitignore に足す。
-- 報告のページは、Home ページの行の題から開く。Home は `decidle serve` で起動し、`http://127.0.0.1:7878/` で開く(ポートは設定の `home_port`)。仕様は `docs/spec-home.md` にある。
-- 報告の JSON とページは、セッションが解決か終了になってから 1 日経つと消える(SPEC AMENDMENT、2026-11-18 依頼者承認)。`decidle serve` が起動時と 1 日 1 回消し、手では `decidle clean` で消せる。`decidle clean --dry-run` は消すものの一覧だけを出す。日数は設定の `clean_after_days` で変えられ、0 にすると消さない。決めてほしいことが答えられないまま終わった報告(終了ボタンで終えたものを含む)は、終了から 7 日経つと消える(SPEC AMENDMENT、2026-11-18 依頼者承認)。日数は `clean_unanswered_after_days` で変えられ、0 にすると消さない。2 つの設定は互いに独立に効く。終わっていないセッションの報告、Home に出ているセッションの報告、記録にないファイル、`.decidle/` の外のファイルは消さない。条件の詳細は `docs/spec-home.md` の「報告の自動削除」にある。
-- 報告ごとに Maestri の portal を出す機能は、既定で止めてある。戻すには、設定の `portal_command` を `"maestri"` にする。戻すと、Maestri のターミナルでは、ページを書いたあと作業名の portal をキャンバスに出す。まとめ役が起動した作業ターミナル(Maestro ではなく、ほかのエージェントとつながっているターミナル)では出さない。
+- To turn decidle off for a terminal, start it with `DECIDLE_MODE=off claude`.
+- Check results are logged to `~/.local/share/decidle/gate.jsonl`. Use the SQL in `docs/queries.sql` to aggregate them.
+- A report is required only for turns that edit 3 or more files, make 20 or more tool calls, or run `maestri ask`. Change the numbers with `edited_files_threshold` and `tool_call_threshold`.
+- To change limits such as character counts or which extensions count as code, put a file shaped like `config.default.json` at `~/.config/decidle/config.json`. Only the keys you write are overridden.
+- Report JSON and pages go to `.decidle/` in the working folder. Add it to your own gitignore if you do not want it in git.
+- Open a report page from the title of its row on the Home page. Start Home with `decidle serve` and open `http://127.0.0.1:7878/` (the port is `home_port`). The spec is `docs/spec-home.md` (Japanese).
+- Report JSON and pages are deleted 1 day after the session is resolved or ended. `decidle serve` deletes them at startup and once a day. Run `decidle clean` to delete them by hand, or `decidle clean --dry-run` to only list them. Change the days with `clean_after_days`; 0 keeps them. Reports whose decisions were never answered (including sessions closed with the end button) are deleted 7 days after the end. Change the days with `clean_unanswered_after_days`; 0 keeps them. The two settings work independently. decidle does not delete reports of sessions still running, reports of sessions shown on Home, files not in its records, or files outside `.decidle/`. Details are in "報告の自動削除" in `docs/spec-home.md`.
+- Opening a Maestri portal for each report is off by default. To turn it back on, set `portal_command` to `"maestri"`. Then, in a Maestri terminal, decidle opens a portal named after the task on the canvas after it writes the page. It does not open one in worker terminals started by an orchestrator (terminals connected to other agents, not the Maestro).
 
-## 修正依頼の回数を数える
+## Count revision requests
 
 ```
 ~/.local/bin/decidle extract > extract.jsonl
 ```
 
-出力を `docs/classify-prompt.md` の指示で LLM に分類させ、`docs/queries.sql` の最後の SQL で週ごとに集計する。出力には会話のプロンプトがそのまま入るので、リポジトリには入れない。
+Have an LLM classify the output with the instructions in `docs/classify-prompt.md`, then aggregate by week with the last SQL in `docs/queries.sql`. The output contains the prompts as they are, so do not commit it.
 
-## 分かっている限界
+## Known limits
 
-- 報告のフォルダの場所を確かめてからページを書くまでの間に、同じ権限の別のプロセスがそのフォルダをリンクにすり替えると、ページが別の場所に書かれる。書く直前にもう一度確かめているが、間を無くすことはできていない。
-- 会話記録は毎回すべて読む。256MB を超える会話記録は読まず、その回は点検しない。
-- 確認のコマンドを実行したかどうかは、コマンドの文字列に語が含まれるかで見ている。実行した結果までは見ていない。
-- Bash 経由で書き換えたファイルと、別のターミナルやサブエージェントが編集したファイルは、点検の対象に入らない。
-- 点検の記録 `gate.jsonl` は増え続ける。要らなくなったら手で消す。
+- Between checking the report folder and writing the page, another process with the same permissions could replace the folder with a link, and the page would be written somewhere else. decidle checks again just before writing, but the gap cannot be removed.
+- The whole transcript is read every time. Transcripts over 256MB are not read, and that turn is not checked.
+- Whether a check command ran is judged by whether the command string contains certain words. The result of the command is not checked.
+- Files changed through Bash, and files edited by other terminals or subagents, are not checked.
+- The check log `gate.jsonl` keeps growing. Delete it by hand when you no longer need it.

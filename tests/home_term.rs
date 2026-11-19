@@ -59,6 +59,10 @@ fn a_start_line_with_an_unusable_terminal_reads_as_none() {
     assert_eq!(term::checked(s("cmux"), None, None), (None, None, None));
 }
 
+fn answer_text_ja(s: &Session) -> Option<String> {
+    term::answer_text(s, decidle::i18n::Lang::Ja)
+}
+
 fn stopped(questions: &[&str], recommends: &[&str]) -> Session {
     Session {
         questions: questions.iter().map(|q| q.to_string()).collect(),
@@ -72,15 +76,15 @@ fn stopped(questions: &[&str], recommends: &[&str]) -> Session {
 #[test]
 fn the_answer_is_built_from_questions_and_recommended_options_only() {
     assert_eq!(
-        term::answer_text(&stopped(&["保存先をどちらにするか?", "ポートを変えるか"], &["ローカル", "7878 のまま"])).as_deref(),
+        answer_text_ja(&stopped(&["保存先をどちらにするか?", "ポートを変えるか"], &["ローカル", "7878 のまま"])).as_deref(),
         Some("回答: 保存先をどちらにするかは「ローカル」で進めて。 ポートを変えるかは「7878 のまま」で進めて。")
     );
-    assert_eq!(term::answer_text(&stopped(&[], &[])), None);
-    assert_eq!(term::answer_text(&stopped(&["問い"], &[""])), None);
-    assert_eq!(term::answer_text(&stopped(&["問い", "問い2"], &["勧め"])), None);
+    assert_eq!(answer_text_ja(&stopped(&[], &[])), None);
+    assert_eq!(answer_text_ja(&stopped(&["問い"], &[""])), None);
+    assert_eq!(answer_text_ja(&stopped(&["問い", "問い2"], &["勧め"])), None);
     for bad in ["$(whoami)", "a`b`", "a; b", "a | b", "a\\n", "a > b", "it's", "!!"] {
-        assert_eq!(term::answer_text(&stopped(&[bad], &["勧め"])), None, "{bad}");
-        assert_eq!(term::answer_text(&stopped(&["問い"], &[bad])), None, "{bad}");
+        assert_eq!(answer_text_ja(&stopped(&[bad], &["勧め"])), None, "{bad}");
+        assert_eq!(answer_text_ja(&stopped(&["問い"], &[bad])), None, "{bad}");
     }
 }
 
@@ -94,8 +98,21 @@ fn the_host_app_is_a_plain_bundle_id_or_nothing() {
 }
 
 #[test]
+fn the_answer_is_written_in_the_configured_language() {
+    use decidle::i18n::Lang;
+    let s = stopped(&["Which store?", "Change the port."], &["Local", "Keep 7878"]);
+    assert_eq!(
+        term::answer_text(&s, Lang::En).as_deref(),
+        Some("Answer: Which store: go with “Local”. Change the port: go with “Keep 7878”.")
+    );
+    assert_eq!(term::answer_text(&stopped(&["git push"], &["yes"]), Lang::En).unwrap().split(' ').next(), Some("Answer:"));
+    // The words around the question hold nothing a shell acts on.
+    assert_eq!(term::answer_text(&stopped(&["a$b"], &["x"]), Lang::En), None);
+}
+
+#[test]
 fn the_answer_never_starts_with_a_word_the_agent_wrote() {
-    let text = term::answer_text(&stopped(&["git push するか"], &["する"])).unwrap();
+    let text = answer_text_ja(&stopped(&["git push するか"], &["する"])).unwrap();
     assert!(text.starts_with("回答: "), "{text}");
 }
 
@@ -170,4 +187,16 @@ fn the_question_prompt_is_open_only_when_hc_shows_it_blocked_on_that_question() 
     assert!(!term::question_open(&get(serde_json::json!({"app": "claude-code", "state": "blocked", "kind": "question"})), q));
     assert!(!term::question_open(&get(serde_json::Value::Null), q));
     assert!(!term::question_open("not json", q));
+}
+
+#[test]
+fn a_command_that_fails_is_reported_in_the_configured_language() {
+    use decidle::i18n::Lang;
+    let missing = vec!["/nonexistent/decidle-no-such-command".to_string()];
+    assert_eq!(term::run(&[], Lang::Ja), Err("空の命令".to_string()));
+    assert_eq!(term::run(&[], Lang::En), Err("empty command".to_string()));
+    let ja = term::run(&missing, Lang::Ja).unwrap_err();
+    assert!(ja.starts_with("/nonexistent/decidle-no-such-command を起動できない: "), "{ja}");
+    let en = term::run(&missing, Lang::En).unwrap_err();
+    assert!(en.starts_with("cannot start /nonexistent/decidle-no-such-command: "), "{en}");
 }

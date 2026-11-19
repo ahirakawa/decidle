@@ -1,5 +1,5 @@
 <!doctype html>
-<html lang="ja">
+<html lang="__LANG__">
 <head>
 <meta charset="utf-8">
 <meta name="decidle-token" content="__TOKEN__">
@@ -97,7 +97,7 @@
   .skin button { border: 2px solid var(--fg); background: var(--bg); color: var(--fg); font: inherit; padding: 3px 10px; cursor: pointer; } .skin button[aria-pressed="true"] { background: var(--fg); color: var(--bg); }
   @media (prefers-reduced-motion: reduce) { * { animation: none !important; transition: none !important; } }
 
-  /* v3: 飾りを引いた版。構図（大きな数字、斜めの面、選んだ行の動き）だけ残す */
+  /* v3: the plain version. Only the layout stays (the big number, the slanted planes, the move of the selected row) */
   body::before, [data-skin="naname"]::after { display: none; }
   .tape, .roll { display: none; }
   [data-skin="naname"] .shard.b { display: none; }
@@ -173,20 +173,24 @@
 <body tabindex="0" data-skin="naname">
 <div id="err" hidden></div>
 <header><div class="shard b"></div><div class="shard"></div><div class="block"></div>
-  <div class="big" id="n"></div><div class="title"><small>WAITING FOR YOU</small>あなた待ち</div>
+  <div class="big" id="n"></div><div class="title"><small>WAITING FOR YOU</small><span id="ttl"></span></div>
   <div class="issue"><b id="clk"></b><span id="date"></span></div></header>
 <div class="cols"><div><nav id="list" class="first"></nav><div class="work" id="work"></div><div class="foot" id="foot"></div></div><aside id="side"></aside></div>
 <div class="skin" id="skin"></div>
+<script id="words" type="application/json">__WORDS__</script>
 <script>
 "use strict";
+// The words of the page in the server's language. `{name}` in a word is filled in by `fill`.
+const W = JSON.parse(document.getElementById("words").textContent);
+const fill = (word, v) => word.replace(/\{(\w+)\}/g, (_, k) => String(v[k]));
 const TOKEN = document.querySelector('meta[name="decidle-token"]').content;
 // The server was started again after this page was loaded: its token is no longer accepted.
 const BOOT = document.querySelector('meta[name="decidle-boot"]').content;
 // The kind of a row. A stopped row splits by attention: need (yes), noneed (no), unknown.
 const kind = s => s.state === "stopped" ? ({ yes: "need", no: "noneed" })[s.attention] || "unknown" : s.state;
-const LABEL = { decide: "決めてほしい", permission: "許可待ち", ask: "質問に回答", need: "確認してほしい", unknown: "止まっている", noneed: "対応は不要", working: "作業中", background: "裏で作業中" };
+const LABEL = Object.fromEntries(["decide", "permission", "ask", "need", "unknown", "noneed", "working", "background"].map(k => [k, W["label_" + k]]));
 const MARK = { decide: "◆", permission: "▲", ask: "▲", need: "●", unknown: "●", noneed: "✓" };
-const MISSING = "一言なしで止まっている";
+const MISSING = W.missing;
 // The buttons are offered on stopped rows only. The server refuses the others with 409.
 const canClose = s => s.state === "decide" || s.state === "stopped";
 let data = { sessions: [], skipped: 0 }, sel = null, drawn = "";
@@ -194,9 +198,9 @@ let data = { sessions: [], skipped: 0 }, sel = null, drawn = "";
 const since = s => Date.parse(s.last_ts);
 function split(t) {
   const sec = Math.max(0, Math.floor((Date.now() - t) / 1000)), m = Math.floor(sec / 60);
-  if (m < 1) return [String(sec), "秒"];
-  if (m < 60) return [String(m), "分"];
-  return [Math.floor(m / 60) + ":" + String(m % 60).padStart(2, "0"), "時間"];
+  if (m < 1) return [String(sec), W.unit_sec];
+  if (m < 60) return [String(m), W.unit_min];
+  return [Math.floor(m / 60) + ":" + String(m % 60).padStart(2, "0"), W.unit_hour];
 }
 function h(tag, attrs, ...kids) {
   const el = document.createElement(tag);
@@ -217,38 +221,46 @@ async function post(path, s, payload) {
       body: JSON.stringify(payload || { session_id: s.session_id, resolves: s.last_stop }),
     });
     const body = await res.json().catch(() => ({}));
-    if (res.status === 403) { alert("サーバーが起動し直されたので、ページを読み込み直す。もう一度押してほしい。"); return location.reload(); }
-    if (!res.ok) alert(body.error || ("失敗: " + res.status));
+    if (res.status === 403) { alert(W.restarted); return location.reload(); }
+    if (!res.ok) alert(body.error || fill(W.failed, { status: res.status }));
   } catch (e) {
-    alert("送れない: " + e.message);
+    alert(fill(W.cannot_send, { error: e.message }));
   }
   refresh();
 }
-// The start time tells apart sessions in the same folder. Old logs without a start line
-// fall back to the session id.
-function startLabel(s) {
+// The start time tells apart sessions in the same folder, in this machine's time zone. Old logs
+// without a start line fall back to the session id (startTime gives null).
+function startTime(s) {
   const t = Date.parse(s.started || "");
-  if (isNaN(t)) return "#" + s.session_id.slice(0, 8);
+  if (isNaN(t)) return null;
   const d = new Date(t), now = new Date(), hm = d.getHours() + ":" + String(d.getMinutes()).padStart(2, "0");
-  return "開始 " + (d.toDateString() === now.toDateString() ? hm : (d.getMonth() + 1) + "/" + d.getDate() + " " + hm);
+  return d.toDateString() === now.toDateString() ? hm : (d.getMonth() + 1) + "/" + d.getDate() + " " + hm;
+}
+function startLabel(s) {
+  const time = startTime(s);
+  return time === null ? "#" + s.session_id.slice(0, 8) : fill(W.started, { time });
 }
 function kill(s) {
-  if (confirm(s.folder + "(" + startLabel(s) + ")の " + s.agent + " を終了する。よいか。")) post("/api/kill", s);
+  if (confirm(fill(W.kill_confirm, { folder: s.folder, start: startLabel(s), agent: s.agent }))) post("/api/kill", s);
 }
-const name = s => s.folder + (data.sessions.filter(x => x.folder === s.folder).length > 1 ? " " + startLabel(s).replace("開始 ", "") + "〜" : "");
+const name = s => {
+  if (data.sessions.filter(x => x.folder === s.folder).length < 2) return s.folder;
+  const time = startTime(s);
+  return s.folder + " " + (time === null ? startLabel(s) : fill(W.since, { time }));
+};
 const btn = (cls, text, onclick, title) => h("button", { class: "cmd " + cls, onclick, title: title || "" }, h("span", {}, text));
 
 function say(s) {
-  if (s.state === "permission") return "ターミナルで許可を出してほしい";
+  if (s.state === "permission") return W.permission;
   if (s.state === "ask") return arr(s.ask).map(q => q || {}).map(q => h("div", { class: "askq" },
-    h("b", {}, str(q.header), q.multi === true ? h("small", {}, "複数選べる") : null),
+    h("b", {}, str(q.header), q.multi === true ? h("small", {}, W.multi) : null),
     str(q.question),
     h("div", { class: "opts" }, arr(q.options).map((o, j) => s.choosable === true
-      ? btn("sub", str(o), () => post("/api/choose", s, { session_id: s.session_id, ask: s.ask_ts, option: j }), "この選択肢を端末で選ぶ")
-      : h("span", {}, "・" + str(o))))));
+      ? btn("sub", str(o), () => post("/api/choose", s, { session_id: s.session_id, ask: s.ask_ts, option: j }), W.choose_title)
+      : h("span", {}, fill(W.bullet, { text: str(o) }))))));
   const qs = s.questions || [], rs = s.recommends || [];
-  if (s.state === "decide" && qs.length) return h("ul", {}, qs.map((q, i) => h("li", {}, q, rs[i] ? h("span", { class: "rec" }, "推奨: " + rs[i]) : null)));
-  if (s.state === "decide") return "決めてほしいこと " + s.decisions + " 件";
+  if (s.state === "decide" && qs.length) return h("ul", {}, qs.map((q, i) => h("li", {}, q, rs[i] ? h("span", { class: "rec" }, fill(W.recommend, { text: rs[i] })) : null)));
+  if (s.state === "decide") return fill(W.decisions, { n: s.decisions });
   return s.note || MISSING;
 }
 // The panel under the selected row: what the agent wants, and what the human can do from here.
@@ -256,18 +268,18 @@ function sheet(s) {
   const k = kind(s), close = canClose(s);
   const first = s.answer_text ? "answer" : s.term ? "focus" : "resolve";
   return h("section", { class: "sheet" },
-    h("span", { class: "lab" }, s.folder + " ／ " + LABEL[k]),
+    h("span", { class: "lab" }, fill(W.lab, { folder: s.folder, label: LABEL[k] })),
     h("div", { class: "say" }, say(s)),
-    h("div", { class: "meta", title: s.session_id }, [s.report_goal ? "目的: " + s.report_goal : null, startLabel(s), s.agent === "codex" ? "Codex" : null, s.term].filter(Boolean).join(" ・ ")),
-    close && !s.term ? h("div", { class: "meta" }, "この端末は Home から操作できない(herdr、Herdr アプリ、cmux の中で始めたセッションだけ)") : null,
-    s.state === "ask" && !s.term ? h("div", { class: "meta" }, "この端末は Home から前に出せないので、端末で回答してほしい") : null,
-    s.answer_text ? h("div", { class: "send" }, h("b", {}, "「推奨で進める」で端末に送る文"), s.answer_text) : null,
+    h("div", { class: "meta", title: s.session_id }, [s.report_goal ? fill(W.goal, { text: s.report_goal }) : null, startLabel(s), s.agent === "codex" ? "Codex" : null, s.term].filter(Boolean).join(W.meta_sep)),
+    close && !s.term ? h("div", { class: "meta" }, W.no_term) : null,
+    s.state === "ask" && !s.term ? h("div", { class: "meta" }, W.ask_no_term) : null,
+    s.answer_text ? h("div", { class: "send" }, h("b", {}, W.send_head), s.answer_text) : null,
     h("div", { class: "cmds" },
-      s.state === "ask" && s.term ? btn("go", "回答しに行く", () => post("/api/focus", s), "このセッションの端末を前に出す") : null,
-      s.answer_text ? btn("go", "推奨で進める", () => post("/api/answer", s), "上の文を端末に入力して Enter を押す") : null,
-      close && s.term ? btn(first === "focus" ? "go" : "sub", "端末へ行く", () => post("/api/focus", s), "このセッションの端末を前に出す") : null,
-      close ? btn(first === "resolve" ? "go" : "sub", "外す", () => post("/api/resolve", s), "見たので一覧から外す。エージェントには何も送らない") : null,
-      close ? btn("end", "終了…", () => kill(s)) : null));
+      s.state === "ask" && s.term ? btn("go", W.go_ask, () => post("/api/focus", s), W.focus_title) : null,
+      s.answer_text ? btn("go", W.answer, () => post("/api/answer", s), W.answer_title) : null,
+      close && s.term ? btn(first === "focus" ? "go" : "sub", W.go, () => post("/api/focus", s), W.focus_title) : null,
+      close ? btn(first === "resolve" ? "go" : "sub", W.resolve, () => post("/api/resolve", s), W.resolve_title) : null,
+      close ? btn("end", W.end, () => kill(s)) : null));
 }
 function item(s, i) {
   const k = kind(s), on = s.session_id === sel;
@@ -286,19 +298,19 @@ const str = x => typeof x === "string" ? x : "";
 function drawSide(s) {
   const side = document.getElementById("side"), r = rep.body;
   if (!s || !s.report_title) return side.replaceChildren();
-  if (!r) return side.replaceChildren(h("article", { class: "rep" }, h("div", { class: "kick" }, "REPORT"), h("h2", {}, s.report_title), h("p", { class: "gone" }, rep.key ? "報告のファイルを読めない(もう消えているかもしれない)。" : "読み込み中…")));
+  if (!r) return side.replaceChildren(h("article", { class: "rep" }, h("div", { class: "kick" }, "REPORT"), h("h2", {}, s.report_title), h("p", { class: "gone" }, rep.key ? W.report_gone : W.loading)));
   side.replaceChildren(h("article", { class: "rep" },
-    h("div", { class: "kick" }, "REPORT", s.report_url ? h("a", { href: s.report_url, target: "_blank", rel: "noopener" }, "別のタブで開く") : null),
+    h("div", { class: "kick" }, "REPORT", s.report_url ? h("a", { href: s.report_url, target: "_blank", rel: "noopener" }, W.open_tab) : null),
     h("h2", {}, str(r.title) || s.report_title),
-    str(r.goal) ? h("p", { class: "goal" }, "目的: " + r.goal) : null,
+    str(r.goal) ? h("p", { class: "goal" }, fill(W.goal, { text: r.goal })) : null,
     h("p", { class: "concl" }, str(r.conclusion)),
-    arr(r.decisions).length ? [h("h3", {}, "決めてほしいこと"), arr(r.decisions).map(d => [
+    arr(r.decisions).length ? [h("h3", {}, W.h_decisions), arr(r.decisions).map(d => [
       h("div", { class: "q" }, str(d.question)),
-      arr(d.options).map(o => h("div", { class: "opt" + (o.label === d.recommend ? " on" : "") }, h("b", {}, str(o.label), o.label === d.recommend ? h("span", { class: "badge" }, "推奨") : null), str(o.effect))),
-      str(d.reason) ? h("p", { class: "why" }, "理由: " + d.reason) : null])] : null,
-    arr(r.verified).length ? [h("h3", {}, "確かめたこと"), h("ul", {}, arr(r.verified).map(v => h("li", {}, str(v))))] : null,
-    arr(r.unverified).length ? [h("h3", {}, "確かめていないこと"), h("ul", { class: "un" }, arr(r.unverified).map(v => h("li", {}, str(v))))] : null,
-    arr(r.deliverables).length ? [h("h3", {}, "成果物"), h("ul", {}, arr(r.deliverables).map(d => h("li", {},
+      arr(d.options).map(o => h("div", { class: "opt" + (o.label === d.recommend ? " on" : "") }, h("b", {}, str(o.label), o.label === d.recommend ? h("span", { class: "badge" }, W.recommend_badge) : null), str(o.effect))),
+      str(d.reason) ? h("p", { class: "why" }, fill(W.reason, { text: d.reason })) : null])] : null,
+    arr(r.verified).length ? [h("h3", {}, W.h_verified), h("ul", {}, arr(r.verified).map(v => h("li", {}, str(v))))] : null,
+    arr(r.unverified).length ? [h("h3", {}, W.h_unverified), h("ul", { class: "un" }, arr(r.unverified).map(v => h("li", {}, str(v))))] : null,
+    arr(r.deliverables).length ? [h("h3", {}, W.h_deliverables), h("ul", {}, arr(r.deliverables).map(d => h("li", {},
       h("span", { class: "path" }, str(d.path)), str(d.summary),
       arr(d.changes).map(c => h("div", { class: "chg" }, (c.line != null ? "L" + c.line + ": " : "") + str(c.before) + " → " + str(c.after))))))] : null));
 }
@@ -349,15 +361,15 @@ function draw() {
   n.textContent = wait.length; n.className = "big" + (wait.length < 10 ? " pad" : "");
   const list = document.getElementById("list");
   list.replaceChildren(...wait.map(item).flat(),
-    ...(done.length ? [h("div", { class: "sec" }, "対応は不要"), ...done.map((s, i) => item(s, wait.length + i)).flat()] : []),
-    ...(all.length ? [] : [h("div", { class: "clearmsg" }, h("span", { class: "stk" }, "ALL CLEAR"), h("div", {}, "待ちなし。"), h("small", {}, "そのまま自分の作業を続けて大丈夫。"))]));
+    ...(done.length ? [h("div", { class: "sec" }, W.label_noneed), ...done.map((s, i) => item(s, wait.length + i)).flat()] : []),
+    ...(all.length ? [] : [h("div", { class: "clearmsg" }, h("span", { class: "stk" }, "ALL CLEAR"), h("div", {}, W.clear_title), h("small", {}, W.clear_sub))]));
   setTimeout(() => list.classList.remove("first"), 700);
   const busy = data.sessions.filter(s => s.state === "working" || s.state === "background");
   document.getElementById("work").replaceChildren(busy.length ? h("b", {}, "NOW WORKING") : "",
-    ...busy.map(s => h("span", { title: (s.note || "") + " " + s.cwd }, h("i", {}, "◐"), name(s) + (s.state === "background" ? "(裏)" : ""),
+    ...busy.map(s => h("span", { title: (s.note || "") + " " + s.cwd }, h("i", {}, "◐"), name(s) + (s.state === "background" ? W.background_mark : ""),
       h("small", { data: { from: since(s) } }, h("span", { class: "v" }), h("small", {})))));
-  document.getElementById("foot").textContent = (data.skipped > 0 ? "読めなかった行: " + data.skipped + " 件 ・ " : "") + "5秒ごとに取り直す ・ ↑↓ で選ぶ ・ T で見た目を替える";
-  document.getElementById("skin").replaceChildren(...[["naname", "斜め"], ["shimen", "紙面"]].map(([v, t]) => h("button", { "aria-pressed": String(v === sk), onclick: () => skin(v) }, t)));
+  document.getElementById("foot").textContent = (data.skipped > 0 ? fill(W.skipped, { n: data.skipped }) : "") + W.foot;
+  document.getElementById("skin").replaceChildren(...[["naname", W.skin_naname], ["shimen", W.skin_shimen]].map(([v, t]) => h("button", { "aria-pressed": String(v === sk), onclick: () => skin(v) }, t)));
   tick();
 }
 function skin(v) { document.body.dataset.skin = v; try { localStorage.setItem("decidle-skin", v); } catch (_) {} draw(); }
@@ -380,10 +392,11 @@ async function refresh() {
     draw();
     err.hidden = true;
   } catch (e) {
-    err.textContent = "取得できない: " + e.message;
+    err.textContent = fill(W.fetch_failed, { error: e.message });
     err.hidden = false;
   }
 }
+document.getElementById("ttl").textContent = W.title;
 let saved = null; try { saved = localStorage.getItem("decidle-skin"); } catch (_) {}
 if (saved === "shimen") document.body.dataset.skin = saved;
 refresh();

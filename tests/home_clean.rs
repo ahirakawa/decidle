@@ -2,6 +2,7 @@
 
 use decidle::home::clean::{self, Settings};
 use decidle::home::events;
+use decidle::i18n::Lang;
 use serde_json::{json, Value};
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -67,7 +68,7 @@ fn write_log(path: &Path, lines: &[(&str, &str, Value, u64)]) {
 }
 
 fn settings() -> Settings {
-    Settings { after_days: 1, unanswered_after_days: 7, report_dir: ".decidle".into() }
+    Settings { after_days: 1, unanswered_after_days: 7, report_dir: ".decidle".into(), lang: Lang::Ja }
 }
 
 fn exists(p: &str) -> bool {
@@ -212,9 +213,9 @@ fn zero_days_turns_cleaning_off() {
     let log = dir.join("events.jsonl");
     let r = report(&dir.join("a"), "t", 3 * DAY);
     write_log(&log, &[("A", "stop", stop(&r, 0), 3 * DAY), ("A", "end", json!({}), 2 * DAY)]);
-    let o = clean::run(&log, &Settings { after_days: 0, unanswered_after_days: 0, report_dir: ".decidle".into() }, false).unwrap();
+    let o = clean::run(&log, &Settings { after_days: 0, unanswered_after_days: 0, report_dir: ".decidle".into(), lang: Lang::Ja }, false).unwrap();
     assert!(o.deleted.is_empty());
-    let o = clean::run(&log, &Settings { after_days: 3, unanswered_after_days: 7, report_dir: ".decidle".into() }, false).unwrap();
+    let o = clean::run(&log, &Settings { after_days: 3, unanswered_after_days: 7, report_dir: ".decidle".into(), lang: Lang::Ja }, false).unwrap();
     assert!(o.deleted.is_empty());
     assert!(exists(&r.0) && exists(&r.1));
 }
@@ -227,6 +228,9 @@ fn clean_command_dry_run_lists_and_keeps() {
     fs::create_dir_all(log.parent().unwrap()).unwrap();
     let r = report(&dir.join("a"), "t", 3 * DAY);
     write_log(&log, &[("A", "stop", stop(&r, 0), 3 * DAY), ("A", "end", json!({}), 2 * DAY)]);
+    let config = home.join(".config/decidle/config.json");
+    fs::create_dir_all(config.parent().unwrap()).unwrap();
+    fs::write(&config, r#"{"language": "en"}"#).unwrap();
     let run = |args: &[&str]| {
         Command::new(env!("CARGO_BIN_EXE_decidle"))
             .arg("clean")
@@ -236,6 +240,11 @@ fn clean_command_dry_run_lists_and_keeps() {
             .output()
             .unwrap()
     };
+    let out = run(&["--dry-run"]);
+    assert!(out.status.success());
+    assert_eq!(String::from_utf8_lossy(&out.stderr), "decidle clean: 2 to delete (not deleted because of --dry-run)\n");
+    // The existing wording is checked in Japanese.
+    fs::write(&config, r#"{"language": "ja"}"#).unwrap();
     let out = run(&["--dry-run"]);
     assert!(out.status.success());
     let listed = String::from_utf8_lossy(&out.stdout);
@@ -277,7 +286,7 @@ fn unanswered_reports_are_deleted_after_their_own_days() {
         ("F", "prompt", n.clone(), 30 * DAY),
         ("F", "stop", json!({"report_path": background.0, "report_html": background.1, "decisions": 1, "background": true}), 30 * DAY),
     ]);
-    let s = |after_days, unanswered_after_days| Settings { after_days, unanswered_after_days, report_dir: ".decidle".into() };
+    let s = |after_days, unanswered_after_days| Settings { after_days, unanswered_after_days, report_dir: ".decidle".into(), lang: Lang::Ja };
     let listed = |o: &clean::Outcome| -> Vec<String> { o.deleted.iter().map(|p| p.to_string_lossy().into_owned()).collect() };
 
     // 0 turns the unanswered kind off; the other kind still runs.
@@ -339,7 +348,7 @@ fn report_ended_by_kill_with_decisions_counts_as_unanswered() {
     // With the unanswered kind off, the killed report with decisions stays at any age.
     let six_more = report(&dir.join("d"), "t", 30 * DAY);
     write_log(&log, &[("D", "prompt", n.clone(), 30 * DAY), ("D", "stop", stop(&six_more, 1), 30 * DAY), ("D", "kill", n.clone(), 20 * DAY)]);
-    let o = clean::run(&log, &Settings { after_days: 1, unanswered_after_days: 0, report_dir: ".decidle".into() }, false).unwrap();
+    let o = clean::run(&log, &Settings { after_days: 1, unanswered_after_days: 0, report_dir: ".decidle".into(), lang: Lang::Ja }, false).unwrap();
     assert!(o.deleted.is_empty());
     assert!(exists(&six_more.0));
 }

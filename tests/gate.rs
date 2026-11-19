@@ -25,7 +25,7 @@ impl Sandbox {
         fs::create_dir_all(&cwd).unwrap();
         fs::write(
             home.join(".config/decidle/config.json"),
-            r#"{"edited_files_threshold": 1, "tool_call_threshold": 8, "ignore_path_patterns": ["/ignored/", ".decidle/"]}"#,
+            r#"{"language": "ja", "edited_files_threshold": 1, "tool_call_threshold": 8, "ignore_path_patterns": ["/ignored/", ".decidle/"]}"#,
         )
         .unwrap();
         Sandbox { home, cwd }
@@ -386,7 +386,7 @@ fn fake_portal(sb: &Sandbox, navigate_ok: bool, create_ok: bool) -> PathBuf {
     fs::set_permissions(&script, fs::Permissions::from_mode(0o755)).unwrap();
     fs::write(
         sb.home.join(".config/decidle/config.json"),
-        json!({"edited_files_threshold": 1, "tool_call_threshold": 8, "ignore_path_patterns": ["/ignored/", ".decidle/"], "portal_command": script}).to_string(),
+        json!({"language": "ja", "edited_files_threshold": 1, "tool_call_threshold": 8, "ignore_path_patterns": ["/ignored/", ".decidle/"], "portal_command": script}).to_string(),
     )
     .unwrap();
     fs::write(sb.home.join("in-maestri"), "").unwrap();
@@ -428,7 +428,7 @@ fn portal_is_not_touched_outside_maestri_or_when_turned_off() {
     let calls = fake_portal(&sb, false, true);
     fs::write(
         sb.home.join(".config/decidle/config.json"),
-        r#"{"edited_files_threshold": 1, "tool_call_threshold": 8, "ignore_path_patterns": ["/ignored/", ".decidle/"], "portal_command": ""}"#,
+        r#"{"language": "ja", "edited_files_threshold": 1, "tool_call_threshold": 8, "ignore_path_patterns": ["/ignored/", ".decidle/"], "portal_command": ""}"#,
     )
     .unwrap();
     passed(&sb.stop(&passing_transcript(&sb), "p1"));
@@ -463,7 +463,7 @@ fn portal_failure_still_passes_and_is_logged() {
     fake_portal(&sb, false, true);
     fs::write(
         sb.home.join(".config/decidle/config.json"),
-        r#"{"edited_files_threshold": 1, "tool_call_threshold": 8, "ignore_path_patterns": ["/ignored/", ".decidle/"], "portal_command": "/nonexistent/maestri"}"#,
+        r#"{"language": "ja", "edited_files_threshold": 1, "tool_call_threshold": 8, "ignore_path_patterns": ["/ignored/", ".decidle/"], "portal_command": "/nonexistent/maestri"}"#,
     )
     .unwrap();
     passed(&sb.stop(&passing_transcript(&sb), "p1"));
@@ -681,7 +681,7 @@ fn short_exchange_is_not_checked() {
 
 #[test]
 fn small_turns_are_not_checked_with_the_default_thresholds() {
-    let default_thresholds = r#"{"ignore_path_patterns": ["/ignored/", ".decidle/"]}"#;
+    let default_thresholds = r#"{"language": "ja", "ignore_path_patterns": ["/ignored/", ".decidle/"]}"#;
     let sb = Sandbox::new();
     fs::write(sb.home.join(".config/decidle/config.json"), default_thresholds).unwrap();
     let mut tools = vec![edit(&sb.file("a.md")), edit(&sb.file("b.md"))];
@@ -892,7 +892,7 @@ fn stop_line_names_the_page_written_with_a_custom_suffix() {
     let sb = Sandbox::new();
     fs::write(
         sb.home.join(".config/decidle/config.json"),
-        r#"{"edited_files_threshold": 1, "tool_call_threshold": 8, "ignore_path_patterns": ["/ignored/", ".decidle/"], "report_suffix": ".rep.json"}"#,
+        r#"{"language": "ja", "edited_files_threshold": 1, "tool_call_threshold": 8, "ignore_path_patterns": ["/ignored/", ".decidle/"], "report_suffix": ".rep.json"}"#,
     )
     .unwrap();
     let p = sb.cwd.join(".decidle/task.rep.json");
@@ -1115,4 +1115,115 @@ fn codex_earlier_turn_and_block_feedback_do_not_count() {
     let feedback = json!({"type": "message", "role": "user", "content": [{"type": "input_text", "text": "報告が決まりに合っていない。次の点を直すこと。"}]});
     let t = codex_transcript(&sb, &[feedback], &[apply_patch(&["a.md", "b.md"])]);
     assert_eq!(codex_stop(&sb, &t, "返事だけ。"), "");
+}
+
+// ---- language: en. ----
+
+fn japanese(c: char) -> bool {
+    matches!(c, '\u{3040}'..='\u{30ff}' | '\u{3400}'..='\u{9fff}' | '\u{ff00}'..='\u{ffef}')
+}
+
+fn english(sb: &Sandbox) {
+    fs::write(
+        sb.home.join(".config/decidle/config.json"),
+        r#"{"language": "en", "edited_files_threshold": 1, "tool_call_threshold": 8, "ignore_path_patterns": ["/ignored/", ".decidle/"]}"#,
+    )
+    .unwrap();
+}
+
+fn english_report(decisions: Value, deliverables: Value) -> Value {
+    json!({
+        "title": "Fix the config",
+        "goal": "Make the work that stopped on a bad config run again.",
+        "conclusion": "Fixed the config.",
+        "decisions": decisions,
+        "verified": [],
+        "unverified": ["Did not run it on the real machine."],
+        "deliverables": deliverables,
+    })
+}
+
+#[test]
+fn english_block_reason_and_page_have_no_japanese() {
+    let sb = Sandbox::new();
+    english(&sb);
+    let t = sb.transcript(&[edit(&sb.file("notes.md"))]);
+    let out = sb.stop_with_reply(&t, "Done.", "p1");
+    let why = reason(&out);
+    assert!(why.starts_with("The report does not follow the rules."), "{why}");
+    assert!(why.contains("No report JSON was written in this turn."), "{why}");
+    assert!(why.contains("## How to report"), "{why}");
+    assert!(!out.chars().any(japanese), "{out}");
+
+    // A report with every kind of block on the page, left with issues after the last round.
+    let decisions = json!([{"question": "Which one?", "options": [
+        {"label": "A", "effect": "Keeps it."}, {"label": "B", "effect": "Drops it."}], "recommend": "A", "reason": "Safer."}]);
+    let code = sb.file("src/main.rs");
+    let deliverables = json!([{"path": "notes.md", "summary": "Added steps."},
+        {"path": "src/main.rs", "summary": "Changed it.", "changes": [{"line": 3, "before": "old", "after": ""}]}]);
+    let r = sb.report(&english_report(decisions, deliverables));
+    let t = sb.transcript(&[edit(&sb.file("notes.md")), edit(&code), r]);
+    let mut last = String::new();
+    for _ in 0..4 {
+        last = sb.stop_with_reply(&t, "Done.", "p2");
+        if !last.contains("\"decision\"") {
+            break;
+        }
+        assert!(reason(&last).contains("a change has line 0, or an empty before or after"), "{last}");
+    }
+    let v: Value = serde_json::from_str(&last).unwrap();
+    let msg = v["systemMessage"].as_str().unwrap();
+    assert!(msg.starts_with("decidle: report page file://"), "{msg}");
+    assert!(msg.contains("These points were left after 2 rejections."), "{msg}");
+    assert!(!last.chars().any(japanese), "{last}");
+    let page = sb.page();
+    assert!(page.contains("<html lang=\"en\">"));
+    for words in ["Decisions for you", "Recommended", "Line 3", "Before", "After", "Deliverables", "Not verified", "Verified", "Goal: ", "Reason: ", "This report has points left from the review."] {
+        assert!(page.contains(words), "{words}");
+    }
+    assert!(!page.chars().any(japanese), "{page}");
+}
+
+#[test]
+fn english_reviewer_marker_is_the_default_and_both_markers_are_read() {
+    let sb = Sandbox::new();
+    english(&sb);
+    let role = "<your_assigned_role>\nStart the request with \"Report review:\".\n</your_assigned_role>";
+    let r = sb.report(&english_report(json!([]), json!([])));
+    let t = role_transcript(&sb, role, &[bash("maestri ask \"worker\" \"build it\""), r.clone()]);
+    let why = reason(&sb.stop(&t, "p1"));
+    assert!(why.contains("starting the request with \"Report review:\""), "{why}");
+    // A role and a request written in Japanese still count.
+    let role = "<your_assigned_role>\n依頼文は「報告の点検:」で始める。\n</your_assigned_role>";
+    let asks = [bash("maestri ask \"reviewer\" \"報告の点検: 設定を直した。\""), r];
+    let t = role_transcript(&sb, role, &asks);
+    passed(&sb.stop(&t, "p2"));
+}
+
+#[test]
+fn codex_english_block_feedback_does_not_count() {
+    let sb = Sandbox::new();
+    english(&sb);
+    sb.file("a.md");
+    sb.file("b.md");
+    let feedback = json!({"type": "message", "role": "user", "content": [{"type": "input_text", "text": "The report does not follow the rules. Fix these points."}]});
+    let t = codex_transcript(&sb, &[feedback], &[apply_patch(&["a.md", "b.md"])]);
+    assert_eq!(codex_stop(&sb, &t, "Only a reply."), "");
+}
+
+#[test]
+fn other_languages_are_a_config_error() {
+    let sb = Sandbox::new();
+    fs::write(sb.home.join(".config/decidle/config.json"), r#"{"language": "fr"}"#).unwrap();
+    sb.report(&english_report(json!([]), json!([])));
+    let out = Command::new(env!("CARGO_BIN_EXE_decidle"))
+        .arg("render")
+        .arg(sb.cwd.join(".decidle/task.report.json"))
+        .env("HOME", &sb.home)
+        .env_remove("DECIDLE_CONFIG")
+        .output()
+        .unwrap();
+    assert_eq!(out.status.code(), Some(1));
+    let err = String::from_utf8_lossy(&out.stderr);
+    assert!(err.contains("language") && err.contains("fr"), "{err}");
 }

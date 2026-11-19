@@ -4,6 +4,7 @@ use std::path::Path;
 use crate::config::Config;
 use crate::transcript::{Entry, Kind};
 use crate::util::{clip, home, read_regular};
+use decidle::i18n::{self, f, t};
 
 const MAX_ROLE_BYTES: u64 = 1024 * 1024;
 
@@ -89,7 +90,7 @@ fn has_orchestrator_role(entries: &[Entry], cwd: &str, cfg: &Config) -> bool {
     }
     role_dirs.iter().any(|role_dir| {
         read_regular(&Path::new(role_dir).join("CLAUDE.md"), MAX_ROLE_BYTES)
-            .is_ok_and(|text| text.contains(&cfg.review_marker))
+            .is_ok_and(|text| has_review_marker(&text, cfg))
     })
 }
 
@@ -125,6 +126,12 @@ pub fn collect_facts(entries: &[Entry], start: usize, cwd: &str, cfg: &Config) -
     TurnFacts { edited_files, turn_commands, tool_calls, is_orchestrator, report_file }
 }
 
+/// Whether the text holds the configured review marker or any language's default one, so that
+/// a role written before a language change still counts.
+fn has_review_marker(text: &str, cfg: &Config) -> bool {
+    text.contains(&cfg.review_marker) || i18n::all("review_marker").any(|m| text.contains(m))
+}
+
 /// True if some command in the shell text starts with `program`, as opposed to merely mentioning it
 /// inside a string, a heredoc or another command's arguments.
 fn invokes(command: &str, program: &str) -> bool {
@@ -157,62 +164,59 @@ fn shown(abs: &str, cwd: &str) -> String {
 
 /// Returns the list of problems found. An empty list means the report passes.
 pub fn check_report(report: &Report, reply: &str, facts: &TurnFacts, cwd: &str, cfg: &Config) -> Vec<String> {
+    let lang = cfg.language;
+    let n = |v: usize| v.to_string();
     let mut issues = Vec::new();
 
     if report.title.trim().is_empty() {
-        issues.push("title が空。作業の名前を書く。".to_string());
+        issues.push(t(lang, "check.title_empty").to_string());
     }
     if report.goal.trim().is_empty() {
-        issues.push("goal が空。人がこの作業で何をしようとしていたかを 1 文で書く。".to_string());
+        issues.push(t(lang, "check.goal_empty").to_string());
     }
     let conclusion_len = report.conclusion.trim().chars().count();
     if conclusion_len == 0 {
-        issues.push("conclusion が空。何が起きたか、何を変えたかを書く。".to_string());
+        issues.push(t(lang, "check.conclusion_empty").to_string());
     } else if conclusion_len > cfg.conclusion_max_chars {
-        issues.push(format!(
-            "conclusion が {conclusion_len} 字ある。{} 字以内にして、内訳や経過は verified か deliverables に移す。",
-            cfg.conclusion_max_chars
-        ));
+        issues.push(f(lang, "check.conclusion_long", &[("len", &n(conclusion_len)), ("max", &n(cfg.conclusion_max_chars))]));
     }
     let reply_len = reply.trim().chars().count();
     if reply_len > cfg.reply_max_chars {
-        issues.push(format!(
-            "ターミナルの返事が {reply_len} 字ある。{} 字以内にして、結論と、決めてほしいことの有無だけを書く。詳細は JSON に書いてある。",
-            cfg.reply_max_chars
-        ));
+        issues.push(f(lang, "check.reply_long", &[("len", &n(reply_len)), ("max", &n(cfg.reply_max_chars))]));
     }
 
     for (i, d) in report.decisions.iter().enumerate() {
         let question_len = d.question.trim().chars().count();
         let name = if question_len == 0 {
-            issues.push(format!("decisions[{i}] の question が空。"));
+            issues.push(f(lang, "check.question_empty", &[("i", &n(i))]));
             format!("decisions[{i}]")
         } else {
-            format!("判断項目「{}」", clip(&d.question, 60))
+            f(lang, "check.decision_name", &[("question", &clip(&d.question, 60))])
         };
         if question_len > cfg.question_max_chars {
-            issues.push(format!(
-                "{name}の question が {question_len} 字ある。Home のカードに出すので {} 字以内にし、背景は reason か options の effect に移す。",
-                cfg.question_max_chars
+            issues.push(f(
+                lang,
+                "check.question_long",
+                &[("name", &name), ("len", &n(question_len)), ("max", &n(cfg.question_max_chars))],
             ));
         }
         if d.options.len() < 2 {
-            issues.push(format!("{name}の options が 2 つ未満。選べるものを全部書く。"));
+            issues.push(f(lang, "check.options_few", &[("name", &name)]));
         }
         if d.options.iter().any(|o| o.label.trim().is_empty() || o.effect.trim().is_empty()) {
-            issues.push(format!("{name}の options に、label か effect が空のものがある。effect には選ぶと何が起きるかを書く。"));
+            issues.push(f(lang, "check.option_empty", &[("name", &name)]));
         }
         if !d.options.iter().any(|o| o.label == d.recommend) {
-            issues.push(format!("{name}の recommend が、options のどの label とも一致しない。"));
+            issues.push(f(lang, "check.recommend_mismatch", &[("name", &name)]));
         }
         if d.reason.trim().is_empty() {
-            issues.push(format!("{name}の reason が空。推奨の理由を書く。"));
+            issues.push(f(lang, "check.reason_empty", &[("name", &name)]));
         }
     }
 
-    for (i, f) in report.deliverables.iter().enumerate() {
-        if f.path.trim().is_empty() || f.summary.trim().is_empty() {
-            issues.push(format!("deliverables[{i}] の path か summary が空。"));
+    for (i, d) in report.deliverables.iter().enumerate() {
+        if d.path.trim().is_empty() || d.summary.trim().is_empty() {
+            issues.push(f(lang, "check.deliverable_empty", &[("i", &n(i))]));
         }
     }
     let listed: Vec<(String, &Deliverable)> = report
@@ -225,17 +229,11 @@ pub fn check_report(report: &Report, reply: &str, facts: &TurnFacts, cwd: &str, 
         let exact = listed.iter().find(|(p, _)| p == file).map(|(_, f)| *f);
         if is_code_file(file, cfg) {
             match exact {
-                None => issues.push(format!(
-                    "コードのファイル {name} が deliverables にない。path をこのファイルにした項目を作り、changes を書く。"
-                )),
-                Some(f) if f.changes.is_empty() => issues.push(format!(
-                    "コードのファイル {name} の changes が空。line、before、after を 1 か所以上書く。"
-                )),
-                Some(f) => {
-                    if f.changes.iter().any(|c| c.line == 0 || c.before.trim().is_empty() || c.after.trim().is_empty()) {
-                        issues.push(format!(
-                            "{name} の changes に、line が 0 か、before か after が空のものがある。新しいファイルの before は「なし（新規）」と書く。"
-                        ));
+                None => issues.push(f(lang, "check.code_missing", &[("name", &name)])),
+                Some(d) if d.changes.is_empty() => issues.push(f(lang, "check.changes_empty", &[("name", &name)])),
+                Some(d) => {
+                    if d.changes.iter().any(|c| c.line == 0 || c.before.trim().is_empty() || c.after.trim().is_empty()) {
+                        issues.push(f(lang, "check.change_bad", &[("name", &name)]));
                     }
                 }
             }
@@ -245,9 +243,7 @@ pub fn check_report(report: &Report, reply: &str, facts: &TurnFacts, cwd: &str, 
             .iter()
             .any(|(p, _)| Path::new(p).is_dir() && file.starts_with(&format!("{p}/")));
         if exact.is_none() && !in_listed_dir {
-            issues.push(format!(
-                "編集したファイル {name} が deliverables にない。ファイルの path か、それを含むフォルダの path を書く。"
-            ));
+            issues.push(f(lang, "check.file_missing", &[("name", &name)]));
         }
     }
 
@@ -258,9 +254,10 @@ pub fn check_report(report: &Report, reply: &str, facts: &TurnFacts, cwd: &str, 
             continue;
         };
         if !rule.commands.iter().any(|c| commands.contains(&c.to_lowercase())) {
-            issues.push(format!(
-                "verified に「{word}」とあるが、このターンに対応するコマンド({})の実行記録がない。実行するか、unverified へ移す。",
-                rule.commands.join("、")
+            issues.push(f(
+                lang,
+                "check.unverified_word",
+                &[("word", word), ("commands", &rule.commands.join(t(lang, "list_sep")))],
             ));
         }
     }
@@ -269,11 +266,12 @@ pub fn check_report(report: &Report, reply: &str, facts: &TurnFacts, cwd: &str, 
         let reviewed = facts
             .turn_commands
             .iter()
-            .any(|c| invokes(c, &cfg.review_command) && c.contains(&cfg.review_marker));
+            .any(|c| invokes(c, &cfg.review_command) && has_review_marker(c, cfg));
         if !reviewed {
-            issues.push(format!(
-                "報告を出す前に、点検役へ下書きを渡していない。依頼文の先頭に「{}」を付けて {} で渡し、指摘を直してから報告する。",
-                cfg.review_marker, cfg.review_command
+            issues.push(f(
+                lang,
+                "check.no_review",
+                &[("marker", &cfg.review_marker), ("command", &cfg.review_command)],
             ));
         }
     }

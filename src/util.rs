@@ -4,6 +4,8 @@ use std::os::unix::fs::{MetadataExt, OpenOptionsExt, PermissionsExt};
 use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
 
+use decidle::i18n::{self, f, t};
+
 #[cfg(target_os = "macos")]
 const O_NOFOLLOW: i32 = 0x0100;
 #[cfg(target_os = "linux")]
@@ -25,7 +27,7 @@ pub fn open_regular(path: &Path) -> io::Result<File> {
     if !file.metadata()?.is_file() {
         return Err(io::Error::new(
             io::ErrorKind::InvalidData,
-            format!("{}: 通常のファイルではない", path.display()),
+            f(i18n::current(), "file.not_regular", &[("path", &path.display().to_string())]),
         ));
     }
     Ok(file)
@@ -44,7 +46,10 @@ fn private_dir(path: &Path) -> io::Result<()> {
     fs::create_dir_all(path)?;
     // set_permissions follows links, so refuse a link planted where the folder should be.
     if !fs::symlink_metadata(path)?.is_dir() {
-        return Err(io::Error::new(io::ErrorKind::InvalidData, format!("{}: フォルダではない", path.display())));
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            f(i18n::current(), "file.not_folder", &[("path", &path.display().to_string())]),
+        ));
     }
     fs::set_permissions(path, fs::Permissions::from_mode(0o700))
 }
@@ -77,7 +82,7 @@ pub fn read_regular(path: &Path, limit: u64) -> io::Result<String> {
     let mut text = String::new();
     file.take(limit + 1).read_to_string(&mut text)?;
     if text.len() as u64 > limit {
-        return Err(invalid("大きすぎる"));
+        return Err(invalid(t(i18n::current(), "file.too_large")));
     }
     Ok(text)
 }

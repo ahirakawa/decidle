@@ -7,6 +7,7 @@ mod transcript;
 mod util;
 
 use decidle::home;
+use decidle::i18n::{self, Lang};
 
 fn main() {
     let args: Vec<String> = std::env::args().collect();
@@ -17,11 +18,18 @@ fn main() {
         }
         Some("extract") => extract::run(&args[2..]),
         Some("render") => gate::run_render(&args[2..]),
-        Some("event") => home::events::run_hook(),
+        Some("event") => {
+            // The hook never fails, so a config it cannot read falls back to the default language.
+            let lang = config::Config::load().map(|c| c.language).unwrap_or_else(|e| {
+                eprintln!("decidle event: {e}");
+                Lang::default()
+            });
+            home::events::run_hook(lang)
+        }
         Some("serve") => match config::Config::load() {
-            Ok(cfg) if cfg.home_port != 0 => home::server::serve(cfg.home_port, cfg.clean_settings()),
+            Ok(cfg) if cfg.home_port != 0 => home::server::serve(cfg.home_port, cfg.clean_settings(), cfg.language),
             Ok(_) => {
-                eprintln!("decidle serve: config の home_port に 0 は使えない");
+                eprintln!("{}", i18n::t(i18n::current(), "cli.port_zero"));
                 1
             }
             Err(e) => {
@@ -57,12 +65,12 @@ fn clean(args: &[String]) -> i32 {
     };
     let settings = cfg.clean_settings();
     if settings.off() {
-        eprintln!("decidle clean: config の clean_after_days と clean_unanswered_after_days が 0 なので消さない");
+        eprintln!("{}", i18n::t(cfg.language, "cli.clean_off"));
         return 0;
     }
     match home::clean::run(&home::events::events_path(), &settings, dry_run) {
         Ok(o) => {
-            home::clean::report(&o, dry_run);
+            home::clean::report(&o, dry_run, cfg.language);
             0
         }
         Err(e) => {

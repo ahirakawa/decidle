@@ -12,10 +12,17 @@ use crate::transcript::{self, Kind};
 use decidle::home::background;
 use decidle::home::events::{self as home_events, StopInfo, StopReport};
 use decidle::home::note;
+use decidle::i18n::{self, f, t, Lang};
 
 use crate::util::{append_line, clip, data_dir, now_iso, read_regular, write_atomic};
 
-const REPORT_FORMAT: &str = include_str!("../docs/report-format.md");
+/// How to write a report, given to the agent with every rejection. One file per language.
+fn report_format(lang: Lang) -> &'static str {
+    match lang {
+        Lang::Ja => include_str!("../docs/report-format.ja.md"),
+        Lang::En => include_str!("../docs/report-format.en.md"),
+    }
+}
 /// Upper bound for the hook input and for a report JSON. Real ones are a few kilobytes.
 const MAX_INPUT_BYTES: u64 = 1024 * 1024;
 
@@ -70,25 +77,26 @@ struct ReportPaths {
 /// Resolves symlinks and `..` before deciding anything, so that the page can only be written
 /// into a real folder named `report_dir`, next to a regular file with the report suffix.
 fn resolve_report(raw: &str, cfg: &Config) -> Result<ReportPaths, String> {
+    let lang = cfg.language;
     let json = std::fs::canonicalize(raw).map_err(|e| format!("{raw}: {e}"))?;
     let meta = std::fs::metadata(&json).map_err(|e| format!("{raw}: {e}"))?;
     if !meta.is_file() {
-        return Err(format!("{raw} は通常のファイルではない"));
+        return Err(f(lang, "gate.not_regular", &[("raw", raw)]));
     }
     if meta.len() > MAX_INPUT_BYTES {
-        return Err(format!("{raw} が大きすぎる（{} バイト）", meta.len()));
+        return Err(f(lang, "gate.too_large", &[("raw", raw), ("n", &meta.len().to_string())]));
     }
-    let parent = json.parent().ok_or_else(|| format!("{raw} の親フォルダがない"))?;
+    let parent = json.parent().ok_or_else(|| f(lang, "gate.no_parent", &[("raw", raw)]))?;
     let dir_name = cfg.report_dir.trim_matches('/');
     if parent.file_name().and_then(|n| n.to_str()) != Some(dir_name) {
-        return Err(format!("{raw} は {dir_name}/ の直下にない"));
+        return Err(f(lang, "gate.not_in_dir", &[("raw", raw), ("dir", dir_name)]));
     }
     let stem = json
         .file_name()
         .and_then(|n| n.to_str())
         .and_then(|n| n.strip_suffix(&cfg.report_suffix))
         .filter(|s| !s.is_empty())
-        .ok_or_else(|| format!("{raw} の名前が {} で終わっていない", cfg.report_suffix))?;
+        .ok_or_else(|| f(lang, "gate.bad_suffix", &[("raw", raw), ("suffix", &cfg.report_suffix)]))?;
     let html = parent.join(format!("{stem}.html"));
     Ok(ReportPaths { json, html })
 }
@@ -100,14 +108,14 @@ fn read_report(paths: &ReportPaths) -> Result<Report, String> {
 
 /// Renders the page next to the report. The page header carries only the report's file name,
 /// so that a committed page does not reveal local paths.
-fn write_page(report: &Report, paths: &ReportPaths, issues: &[String]) -> Result<String, String> {
-    let fail = |e: String| format!("ページ {} を書けない: {e}", paths.html.display());
+fn write_page(report: &Report, paths: &ReportPaths, issues: &[String], lang: Lang) -> Result<String, String> {
+    let fail = |e: String| f(lang, "gate.page_unwritable", &[("path", &paths.html.display().to_string()), ("e", &e)]);
     let name = paths.json.file_name().and_then(|n| n.to_str()).unwrap_or_default();
-    let html = render(report, &format!("{} ・ {name}", now_iso()), issues);
+    let html = render(report, &format!("{}{}{name}", now_iso(), t(lang, "page.meta_sep")), issues, lang);
     // The folder was validated earlier; make sure it has not been swapped for a link since then.
-    let parent = paths.html.parent().ok_or_else(|| fail("親フォルダがない".to_string()))?;
+    let parent = paths.html.parent().ok_or_else(|| fail(t(lang, "gate.page_no_parent").to_string()))?;
     if std::fs::canonicalize(parent).ok().as_deref() != Some(parent) {
-        return Err(fail("報告のフォルダが入れ替わった".to_string()));
+        return Err(fail(t(lang, "gate.folder_replaced").to_string()));
     }
     write_atomic(&paths.html, html.as_bytes(), false).map_err(|e| fail(e.to_string()))?;
     Ok(paths.html.to_string_lossy().into_owned())
@@ -139,7 +147,7 @@ fn maestri_command(program: &str, args: &[&str]) -> Result<(bool, String), Strin
             None if Instant::now() >= deadline => {
                 let _ = child.kill();
                 let _ = child.wait();
-                return Err(format!("{program} {} が時間切れになった", args.join(" ")));
+                return Err(f(i18n::current(), "gate.timeout", &[("command", &format!("{program} {}", args.join(" ")))]));
             }
             None => std::thread::sleep(Duration::from_millis(20)),
         }
@@ -176,7 +184,7 @@ fn show_in_portal(html_path: &str, cfg: &Config) -> Option<String> {
     let name = Path::new(html_path).file_stem().and_then(|n| n.to_str()).unwrap_or_default();
     // A leading hyphen would be read as an option by the portal command.
     if name.is_empty() || name.starts_with('-') {
-        return Some(format!("portal: 名前 {name:?} は使えない"));
+        return Some(f(cfg.language, "gate.portal_bad_name", &[("name", &format!("{name:?}"))]));
     }
     // If the list cannot be read, show the page: a missing page costs the human more than an extra one.
     if maestri_command(&cfg.portal_command, &["list"]).is_ok_and(|(ok, out)| ok && is_worker_terminal(&out)) {
@@ -191,7 +199,7 @@ fn show_in_portal(html_path: &str, cfg: &Config) -> Option<String> {
     };
     match result {
         Ok(true) => None,
-        Ok(false) => Some("portal: create が失敗した".to_string()),
+        Ok(false) => Some(t(cfg.language, "gate.portal_create_failed").to_string()),
         Err(e) => Some(format!("portal: {e}")),
     }
 }
@@ -199,12 +207,12 @@ fn show_in_portal(html_path: &str, cfg: &Config) -> Option<String> {
 /// Tells the agent which turns need a report, so that it stops writing one after every small task.
 fn when_to_report(cfg: &Config) -> String {
     let mut lines = vec![
-        "報告を書くのは、次のどれかに当たるターンだけにする。当たらないターンでは、人間に頼まれないかぎり報告の JSON を書かない。".to_string(),
-        format!("- 編集したファイルが {} 個以上ある。", cfg.edited_files_threshold),
-        format!("- ツールの呼び出しが {} 回以上ある。", cfg.tool_call_threshold),
+        t(cfg.language, "gate.when").to_string(),
+        f(cfg.language, "gate.when_files", &[("n", &cfg.edited_files_threshold.to_string())]),
+        f(cfg.language, "gate.when_tools", &[("n", &cfg.tool_call_threshold.to_string())]),
     ];
     for command in &cfg.trigger_commands {
-        lines.push(format!("- `{command}` を実行した。"));
+        lines.push(f(cfg.language, "gate.when_command", &[("command", command)]));
     }
     lines.join("\n")
 }
@@ -247,14 +255,14 @@ fn record_stop(target: &Option<StopTarget>, report: Option<&StopReport>) {
     let background = match background::pending(Path::new(&t.transcript_path)) {
         Ok(p) => p.waiting(),
         Err(e) => {
-            eprintln!("decidle: 裏の作業を確かめるための会話記録を読めない: {e}");
+            eprintln!("{}", f(i18n::current(), "gate.background_unreadable", &[("e", &e.to_string())]));
             false
         }
     };
     let (attention, note) = note::parse(&last_reply(t));
     let info = StopInfo { background, attention, note };
     if let Err(e) = home_events::append_stop(&home_events::events_path(), &t.session_id, &t.cwd, report, &info) {
-        eprintln!("decidle: events.jsonl に停止を書けない: {e}");
+        eprintln!("{}", f(i18n::current(), "gate.stop_unwritable", &[("e", &e.to_string())]));
     }
 }
 
@@ -315,12 +323,13 @@ pub fn run_stop() {
 }
 
 fn evaluate(input: &HookInput, cfg: &Config, data_dir: &Path, session_id: &str) -> Result<Verdict, String> {
-    let transcript_path = input.transcript_path.as_deref().ok_or("transcript_path がない")?;
+    let lang = cfg.language;
+    let transcript_path = input.transcript_path.as_deref().ok_or(t(lang, "gate.no_transcript_path"))?;
     let entries = transcript::load(Path::new(transcript_path))
-        .map_err(|e| format!("会話記録 {transcript_path} を読めない: {e}"))?;
+        .map_err(|e| f(lang, "gate.transcript_unreadable", &[("path", transcript_path), ("e", &e.to_string())]))?;
     let turn = input.prompt_id.as_deref().or(input.turn_id.as_deref());
     let start = transcript::turn_start(&entries, turn)
-        .ok_or("会話記録にプロンプトが見つからない")?;
+        .ok_or(t(lang, "gate.no_prompt"))?;
     let cwd = input.cwd.clone().unwrap_or_default();
     let facts = collect_facts(&entries, start, &cwd, cfg);
     if !should_check(&facts, cfg) {
@@ -340,12 +349,9 @@ fn evaluate(input: &HookInput, cfg: &Config, data_dir: &Path, session_id: &str) 
     // A missing, misplaced or unreadable report is the agent's problem to fix, not a failure of the gate.
     let mut loaded: Option<(Report, ReportPaths)> = None;
     let issues = match &facts.report_file {
-        None => vec![format!(
-            "このターンで報告の JSON が書かれていない。{}/<作業名>{} に書く。",
-            cfg.report_dir, cfg.report_suffix
-        )],
+        None => vec![f(lang, "gate.no_report", &[("dir", &cfg.report_dir), ("suffix", &cfg.report_suffix)])],
         Some(raw) => match resolve_report(raw, cfg).and_then(|p| read_report(&p).map(|r| (r, p))) {
-            Err(e) => vec![format!("報告の JSON を読めない: {e}")],
+            Err(e) => vec![f(lang, "gate.unreadable_report", &[("e", &e)])],
             Ok((report, paths)) => {
                 let found = check_report(&report, &reply, &facts, &cwd, cfg);
                 loaded = Some((report, paths));
@@ -361,9 +367,9 @@ fn evaluate(input: &HookInput, cfg: &Config, data_dir: &Path, session_id: &str) 
     let path = state_path(data_dir, session_id);
     // Only a missing state file means "no rejections yet". Any other failure must not reset the count.
     let mut state: State = match read_regular(&path, MAX_INPUT_BYTES) {
-        Ok(text) => serde_json::from_str(&text).map_err(|e| format!("状態を読めない: {e}"))?,
+        Ok(text) => serde_json::from_str(&text).map_err(|e| f(lang, "gate.state_unreadable", &[("e", &e.to_string())]))?,
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => State::default(),
-        Err(e) => return Err(format!("状態を読めない: {e}")),
+        Err(e) => return Err(f(lang, "gate.state_unreadable", &[("e", &e.to_string())])),
     };
     if state.turn_key != turn_key {
         state = State { turn_key, rounds: 0, taught: false };
@@ -378,7 +384,7 @@ fn evaluate(input: &HookInput, cfg: &Config, data_dir: &Path, session_id: &str) 
         .filter(|e| {
             e.kind == Kind::User
                 && e.is_meta
-                && (e.text.starts_with("Stop hook feedback") || e.text.starts_with(transcript::codex::BLOCK_PREFIX))
+                && (e.text.starts_with("Stop hook feedback") || transcript::codex::is_block(&e.text))
         })
         .count();
     let within_limit = rejections <= cfg.max_rounds as usize;
@@ -389,10 +395,11 @@ fn evaluate(input: &HookInput, cfg: &Config, data_dir: &Path, session_id: &str) 
             state.rounds += 1;
         }
         // Without a saved count the limit cannot be enforced, so do not block if saving fails.
-        save_state(&path, &state)?;
-        let reason = format!(
-            "報告が決まりに合っていない。次の点を直すこと。\n\n{list}\n\n{}\n\n{REPORT_FORMAT}",
-            when_to_report(cfg)
+        save_state(&path, &state, lang)?;
+        let reason = f(
+            lang,
+            "gate.block",
+            &[("list", &list), ("when", &when_to_report(cfg)), ("format", report_format(lang))],
         );
         log(data_dir, session_id, "block", &issues, state.rounds, None);
         return Ok(Verdict::Block(json!({ "decision": "block", "reason": reason }).to_string()));
@@ -403,17 +410,17 @@ fn evaluate(input: &HookInput, cfg: &Config, data_dir: &Path, session_id: &str) 
     let mut written_html = None;
     let mut message = match &loaded {
         Some((report, paths)) => {
-            let html_path = write_page(report, paths, &issues)?;
+            let html_path = write_page(report, paths, &issues, lang)?;
             written_html = Some(html_path.clone());
             portal_error = show_in_portal(&html_path, cfg);
-            format!("decidle: 報告のページ {}", file_url(&html_path))
+            f(lang, "gate.page", &[("url", &file_url(&html_path))])
         }
-        None => "decidle: 報告のページは作れなかった。".to_string(),
+        None => t(lang, "gate.no_page").to_string(),
     };
     if issues.is_empty() {
         log(data_dir, session_id, "pass", &issues, state.rounds, portal_error.as_deref());
     } else {
-        message.push_str(&format!("\n{}回差し戻しても次の点が残った。\n{list}", cfg.max_rounds));
+        message.push_str(&f(lang, "gate.exhausted", &[("n", &cfg.max_rounds.to_string()), ("list", &list)]));
         log(data_dir, session_id, "exhausted", &issues, state.rounds, portal_error.as_deref());
     }
     let report = loaded.zip(written_html).map(|((report, paths), html)| StopReport {
@@ -434,9 +441,9 @@ fn evaluate(input: &HookInput, cfg: &Config, data_dir: &Path, session_id: &str) 
     Ok(Verdict::Stop(report, Some(json!({ "systemMessage": message }).to_string())))
 }
 
-fn save_state(path: &Path, state: &State) -> Result<(), String> {
+fn save_state(path: &Path, state: &State, lang: Lang) -> Result<(), String> {
     let text = serde_json::to_string(state).map_err(|e| e.to_string())?;
-    write_atomic(path, text.as_bytes(), true).map_err(|e| format!("状態を保存できない: {e}"))
+    write_atomic(path, text.as_bytes(), true).map_err(|e| f(lang, "gate.state_unsaved", &[("e", &e.to_string())]))
 }
 
 /// `decidle render <report.json>`: writes the page without waiting for the Stop hook,
@@ -449,7 +456,7 @@ pub fn run_render(args: &[String]) -> i32 {
     let result = Config::load().and_then(|cfg| {
         let paths = resolve_report(json_path, &cfg)?;
         let report = read_report(&paths).map_err(|e| format!("{json_path}: {e}"))?;
-        write_page(&report, &paths, &[])
+        write_page(&report, &paths, &[], cfg.language)
     });
     match result {
         Ok(html_path) => {

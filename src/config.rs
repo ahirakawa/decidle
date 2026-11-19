@@ -3,6 +3,7 @@ use serde_json::Value;
 use std::path::PathBuf;
 
 use crate::util::{home, read_regular};
+use decidle::i18n::{self, Lang};
 
 const DEFAULT_CONFIG: &str = include_str!("../config.default.json");
 const MAX_ROUNDS_LIMIT: u32 = 5;
@@ -16,6 +17,8 @@ pub struct VerificationRule {
 
 #[derive(Deserialize, Clone)]
 pub struct Config {
+    /// Language of everything decidle writes for humans and agents: `ja` or `en`.
+    pub language: Lang,
     pub report_dir: String,
     pub report_suffix: String,
     pub conclusion_max_chars: usize,
@@ -31,6 +34,8 @@ pub struct Config {
     pub trigger_commands: Vec<String>,
     pub role_dir_marker: String,
     pub review_command: String,
+    /// Start of the request that sends a draft to the reviewer. Defaults to the configured
+    /// language's marker; readers accept every language's marker as well.
     pub review_marker: String,
     pub verification_rules: Vec<VerificationRule>,
     pub max_rounds: u32,
@@ -54,6 +59,7 @@ impl Config {
             after_days: self.clean_after_days,
             unanswered_after_days: self.clean_unanswered_after_days,
             report_dir: self.report_dir.clone(),
+            lang: self.language,
         }
     }
 }
@@ -81,18 +87,31 @@ impl Config {
                 }
             }
         }
+        // review_marker is written by the agent, so its default follows the language.
+        if let Some(base) = merged.as_object_mut() {
+            if !base.contains_key("review_marker") {
+                let lang: Lang = base
+                    .get("language")
+                    .map(|v| Lang::deserialize(v).map_err(|e| format!("config: language: {e}")))
+                    .transpose()?
+                    .unwrap_or_default();
+                base.insert("review_marker".into(), i18n::t(lang, "review_marker").into());
+            }
+        }
         let mut cfg: Config = serde_json::from_value(merged).map_err(|e| format!("config: {e}"))?;
+        let lang = cfg.language;
         // A config file must not be able to make blocking unbounded or widen what counts as a report.
         cfg.max_rounds = cfg.max_rounds.min(MAX_ROUNDS_LIMIT);
         if cfg.report_dir.is_empty() || cfg.report_dir.contains('/') || cfg.report_dir.starts_with('.') && cfg.report_dir.len() == 1 {
-            return Err("config: report_dir はフォルダ名 1 つにする".to_string());
+            return Err(i18n::t(lang, "config.report_dir").to_string());
         }
         if cfg.report_suffix.len() <= ".json".len() || !cfg.report_suffix.ends_with(".json") {
-            return Err("config: report_suffix は .json で終わる、.json より長い文字列にする".to_string());
+            return Err(i18n::t(lang, "config.report_suffix").to_string());
         }
         if cfg.role_dir_marker.is_empty() || cfg.review_marker.is_empty() || cfg.review_command.is_empty() {
-            return Err("config: role_dir_marker、review_marker、review_command は空にできない".to_string());
+            return Err(i18n::t(lang, "config.empty").to_string());
         }
+        i18n::set_current(lang);
         Ok(cfg)
     }
 }
