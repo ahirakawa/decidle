@@ -350,3 +350,15 @@ fn start_records_the_app_terminal_from_hc_terminal_id() {
     assert_eq!(run(&cmux), (json!("cmux"), json!(cmux[0].1)));
     assert_eq!(run(&[("HC_TERMINAL_ID", "host/t1")]), (Value::Null, Value::Null));
 }
+
+#[test]
+fn a_choose_line_names_the_ask_and_the_option() {
+    let home = temp_home();
+    let log = log_of(&home);
+    let ts = events::append(&log, events::choice("s", "/w", "2026-11-19T00:00:00.000001Z", 2), events::HOOK_LOCK_TIMEOUT).unwrap();
+    let line = lines(&home).pop().unwrap();
+    assert_eq!(line["ts"], json!(ts));
+    assert_eq!((&line["event"], &line["resolves"], &line["option"]), (&json!("choose"), &json!("2026-11-19T00:00:00.000001Z"), &json!(2)));
+    let ev = read::load(&log).unwrap().events.pop().unwrap();
+    assert_eq!((ev.kind, ev.resolves.as_deref(), ev.option), (Some(Kind::Choose), Some("2026-11-19T00:00:00.000001Z"), Some(2)));
+}

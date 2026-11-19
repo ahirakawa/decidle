@@ -42,6 +42,8 @@ pub enum Kind {
     Ask,
     /// The human answered it (PostToolUse).
     Asked,
+    /// The Home page pressed an option of the question on the human's behalf.
+    Choose,
 }
 
 /// One question of an AskUserQuestion prompt, as recorded on an ask line.
@@ -68,6 +70,7 @@ impl Kind {
             "interrupt" => Kind::Interrupt,
             "ask" => Kind::Ask,
             "asked" => Kind::Asked,
+            "choose" => Kind::Choose,
             _ => return None,
         })
     }
@@ -107,6 +110,8 @@ pub struct Event {
     pub term_ws: Option<String>,
     /// ask only: the questions of the prompt.
     pub ask: Vec<Question>,
+    /// choose only: the number of the pressed option, from 0.
+    pub option: Option<i64>,
 }
 
 /// The accumulator of the fold. `st`, `last_stop` and `decisions` are the model's `st`,
@@ -135,6 +140,8 @@ pub struct Session {
     pub term_ws: Option<String>,
     /// The questions of the latest ask while Asking; empty in every other state.
     pub ask: Vec<Question>,
+    /// ts of that ask line while Asking; None in every other state.
+    pub ask_ts: Option<String>,
     /// ts of the latest start line (startup, resume or clear). None if the log has none.
     pub started: Option<String>,
     /// From the latest start line: claude or codex. None on old lines.
@@ -184,8 +191,11 @@ pub fn step(acc: &Session, ev: &Event) -> Session {
         Some(Kind::Ask) => {
             next.st = St::Asking;
             next.ask = ev.ask.clone();
+            next.ask_ts = Some(ev.ts.clone());
         }
         Some(Kind::Asked) if acc.st == St::Asking => next.st = St::Working,
+        // An option was pressed: the agent goes on. The asked line that follows finds Working.
+        Some(Kind::Choose) if acc.st == St::Asking && ev.resolves.is_some() && ev.resolves == acc.ask_ts => next.st = St::Working,
         Some(Kind::Stop) => {
             next.st = if ev.background { St::Background } else { St::Stopped };
             next.last_stop = Some(ev.ts.clone());
@@ -210,6 +220,7 @@ pub fn step(acc: &Session, ev: &Event) -> Session {
     }
     if next.st != St::Asking {
         next.ask = Vec::new();
+        next.ask_ts = None;
     }
     next.session_id = ev.session_id.clone();
     if !ev.cwd.is_empty() {

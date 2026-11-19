@@ -99,14 +99,14 @@ export default class Decidle extends View {
   }
 
   // A 403 may mean the server started again with a new token: read the file again, once.
-  async post(path, s, cx) {
+  async post(path, s, cx, payload) {
     this.err = null;
     try {
       if (this.token === null) await this.readToken();
-      let res = await this.send(path, s);
+      let res = await this.send(path, s, payload);
       if (res.status === 403) {
         await this.readToken();
-        res = await this.send(path, s);
+        res = await this.send(path, s, payload);
       }
       if (!res.ok) {
         const body = await res.json().catch(() => ({}));
@@ -118,11 +118,11 @@ export default class Decidle extends View {
     await this.refresh(cx);
   }
 
-  send(path, s) {
+  send(path, s, payload) {
     return fetch(this.base() + path, {
       method: "POST",
       headers: { "Content-Type": "application/json", "X-Decidle-Token": this.token || "", Origin: this.base() },
-      body: JSON.stringify({ session_id: s.session_id, resolves: s.last_stop }),
+      body: JSON.stringify(payload || { session_id: s.session_id, resolves: s.last_stop }),
     });
   }
 
@@ -163,7 +163,9 @@ export default class Decidle extends View {
               .when(q.multi === true, (el) => el.child(div().text_size(11).text_color(t.muted).child("複数選べる"))))
             .child(div().child(str(q.question)))
             .child(h_flex().flex_wrap().gap(4).children(
-              arr(q.options).map((o, j) => div().id("opt-" + i + "-" + j).px(6).py(1).rounded(3).border(1).border_color(t.border).text_size(11).child(str(o)))))));
+              arr(q.options).map((o, j) => s.choosable === true
+                ? this.button(t, "opt-" + i + "-" + j, str(o), false, (cx) => cx.spawn(async (cx) => this.post("/api/choose", s, cx, { session_id: s.session_id, ask: s.ask_ts, option: j })))
+                : div().id("opt-" + i + "-" + j).text_size(11).child("・" + str(o)))))));
     }
     const qs = arr(s.questions), rs = arr(s.recommends);
     if (s.state === "decide" && qs.length) {

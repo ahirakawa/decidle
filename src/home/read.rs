@@ -45,7 +45,8 @@ SELECT
     j->>'term',
     j->>'term_id',
     j->>'term_ws',
-    CASE WHEN json_type(j->'ask') = 'ARRAY' THEN CAST(j->'ask' AS VARCHAR) END
+    CASE WHEN json_type(j->'ask') = 'ARRAY' THEN CAST(j->'ask' AS VARCHAR) END,
+    try_cast(j->>'option' AS BIGINT)
 FROM parsed ORDER BY n
 "#;
 
@@ -74,10 +75,11 @@ type Row = (
     Option<String>,
     Option<String>,
     Option<String>,
+    Option<i64>,
 );
 
 fn to_event(r: Row) -> Option<Event> {
-    let (ts, ts_us, session_id, cwd, event, pid, pid_started, report_path, report_title, decisions, resolves, transcript_path, report_html, background, attention, note, questions, report_goal, agent, recommends, term, term_id, term_ws, ask) = r;
+    let (ts, ts_us, session_id, cwd, event, pid, pid_started, report_path, report_title, decisions, resolves, transcript_path, report_html, background, attention, note, questions, report_goal, agent, recommends, term, term_id, term_ws, ask, option) = r;
     let kind = Kind::parse(event.as_deref()?)?;
     let (term, term_id, term_ws) = super::term::checked(term, term_id, term_ws);
     Some(Event {
@@ -106,6 +108,7 @@ fn to_event(r: Row) -> Option<Event> {
         term_ws,
         // Only an ask line carries questions.
         ask: if kind == Kind::Ask { ask.as_deref().map(parse_ask).unwrap_or_default() } else { Vec::new() },
+        option,
     })
 }
 
@@ -190,6 +193,7 @@ pub fn load(path: &Path) -> Result<Loaded, String> {
                 row.get(21)?,
                 row.get(22)?,
                 row.get(23)?,
+                row.get(24)?,
             ))
         })
         .map_err(fail)?;

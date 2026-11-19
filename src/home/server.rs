@@ -168,6 +168,8 @@ fn row(s: &Session) -> Value {
         "recommends": s.recommends,
         // The reducer keeps the questions only while Asking.
         "ask": s.ask,
+        "ask_ts": s.ask_ts,
+        "choosable": term::choosable(s),
         "term": s.term,
         // The Herdr app mod brings an hc terminal to the front by this id, without the server.
         "term_id": s.term_id,
@@ -192,6 +194,14 @@ struct Target {
 #[derive(Deserialize)]
 struct FocusTarget {
     session_id: String,
+}
+
+/// What choose takes: the session, the ts of the ask line the human saw, and the pressed option.
+#[derive(Deserialize)]
+struct ChooseTarget {
+    session_id: String,
+    ask: String,
+    option: usize,
 }
 
 fn read_request(stream: &mut TcpStream) -> io::Result<Request> {
@@ -356,6 +366,10 @@ impl Server {
                 _ => error(400, "session_id が要る"),
             },
             ("POST", "/api/answer") => self.with_target(req, |t| self.answer(t)),
+            ("POST", "/api/choose") => match serde_json::from_slice::<ChooseTarget>(&req.body) {
+                Ok(t) if !t.session_id.is_empty() && !t.ask.is_empty() => self.choose(&t),
+                _ => error(400, "session_id と ask と option が要る"),
+            },
             _ => error(404, "not found"),
         }
     }
@@ -551,6 +565,46 @@ impl Server {
             return error(500, &e.to_string());
         }
         self.run_all(&commands)
+    }
+
+    /// Presses the digit key of an option in the session's question prompt. As with answer, the
+    /// checks, the choose line and the key press all happen under the append lock, and the line
+    /// comes first, so a second press finds the question already chosen.
+    fn choose(&self, t: &ChooseTarget) -> Response {
+        let mut lock = match LogLock::acquire(&self.events, KILL_LOCK_TIMEOUT) {
+            Ok(l) => l,
+            Err(e) => return error(500, &e.to_string()),
+        };
+        let session = match self.find(&t.session_id) {
+            Ok(s) => s,
+            Err(r) => return r,
+        };
+        // A choose already accepted for this ask has moved the session to Working.
+        if session.st != St::Asking || session.ask_ts.as_deref() != Some(t.ask.as_str()) {
+            return error(409, "見ていた質問のあとに新しい出来事がある");
+        }
+        if !term::choosable(&session) {
+            return error(409, "この質問は Home から選べないので、端末で回答してほしい");
+        }
+        let question = &session.ask[0];
+        if t.option >= question.options.len() {
+            return error(409, "その番号の選択肢はない");
+        }
+        let (Some(get), Some(keys)) = (term::occupant_command(&session), term::choose_command(&session, t.option)) else {
+            return error(409, "この質問は Home から選べないので、端末で回答してほしい");
+        };
+        match (self.runner)(&get) {
+            Ok(out) if !term::occupant_is(&out, &session) => return error(409, "記録したペインには、いま別のものが入っている"),
+            Ok(out) if !term::question_open(&out, &question.question) => {
+                return error(409, "端末に、この質問の選択画面が開いていない")
+            }
+            Ok(_) => {}
+            Err(e) => return error(409, &format!("記録したペインに、このセッションが見つからない: {e}")),
+        }
+        if let Err(e) = lock.append(events::choice(&t.session_id, &session.cwd, &t.ask, t.option)) {
+            return error(500, &e.to_string());
+        }
+        self.run_all(&[keys])
     }
 
     /// Where a pane can come to hold another agent (herdr), asks the terminal which session the pane holds now.

@@ -135,7 +135,8 @@
   .sheet .askq { margin: 0 0 12px; } .sheet .askq:last-child { margin-bottom: 0; }
   .sheet .askq b { display: block; font-size: 11px; letter-spacing: .08em; opacity: .75; } .sheet .askq b small { font: inherit; margin-left: 8px; }
   .sheet .opts { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 6px; }
-  .sheet .opts span { border: 1.5px solid currentColor; padding: 1px 9px; font: 700 12.5px/1.5 var(--jp); overflow-wrap: anywhere; }
+  .sheet .opts span { font: 700 12.5px/1.5 var(--jp); overflow-wrap: anywhere; }
+  .sheet .opts .cmd { font-size: 12.5px; padding: 3px 12px; overflow-wrap: anywhere; }
   .sheet .say .askq { overflow-wrap: anywhere; }
   a.cmd { text-decoration: none; display: inline-block; }
   .k-unknown { --c: var(--permission); } .k-noneed { --c: currentColor; }
@@ -208,12 +209,12 @@ function h(tag, attrs, ...kids) {
   for (const k of kids.flat(Infinity)) if (k != null && k !== false) el.append(k);
   return el;
 }
-async function post(path, s) {
+async function post(path, s, payload) {
   try {
     const res = await fetch(path, {
       method: "POST",
       headers: { "Content-Type": "application/json", "X-Decidle-Token": TOKEN },
-      body: JSON.stringify({ session_id: s.session_id, resolves: s.last_stop }),
+      body: JSON.stringify(payload || { session_id: s.session_id, resolves: s.last_stop }),
     });
     const body = await res.json().catch(() => ({}));
     if (res.status === 403) { alert("サーバーが起動し直されたので、ページを読み込み直す。もう一度押してほしい。"); return location.reload(); }
@@ -242,7 +243,9 @@ function say(s) {
   if (s.state === "ask") return arr(s.ask).map(q => q || {}).map(q => h("div", { class: "askq" },
     h("b", {}, str(q.header), q.multi === true ? h("small", {}, "複数選べる") : null),
     str(q.question),
-    h("div", { class: "opts" }, arr(q.options).map(o => h("span", {}, str(o))))));
+    h("div", { class: "opts" }, arr(q.options).map((o, j) => s.choosable === true
+      ? btn("sub", str(o), () => post("/api/choose", s, { session_id: s.session_id, ask: s.ask_ts, option: j }), "この選択肢を端末で選ぶ")
+      : h("span", {}, "・" + str(o))))));
   const qs = s.questions || [], rs = s.recommends || [];
   if (s.state === "decide" && qs.length) return h("ul", {}, qs.map((q, i) => h("li", {}, q, rs[i] ? h("span", { class: "rec" }, "推奨: " + rs[i]) : null)));
   if (s.state === "decide") return "決めてほしいこと " + s.decisions + " 件";

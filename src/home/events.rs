@@ -254,6 +254,14 @@ pub fn resolution(session_id: &str, cwd: &str, event: &str, resolves: &str) -> M
     m
 }
 
+/// The choose line: the Home page pressed option `option` (from 0) of the question on the ask
+/// line `resolves`.
+pub fn choice(session_id: &str, cwd: &str, resolves: &str, option: usize) -> Map<String, Value> {
+    let mut m = resolution(session_id, cwd, "choose", resolves);
+    m.insert("option".into(), json!(option));
+    m
+}
+
 /// Only the fields we keep. The prompt and the message are never read into this struct.
 #[derive(Deserialize, Default)]
 struct HookInput {

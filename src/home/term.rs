@@ -4,7 +4,7 @@
 use std::io;
 use std::process::{Command, Stdio};
 
-use super::state::Session;
+use super::state::{Session, St};
 
 /// What the SessionStart hook records about the terminal.
 #[derive(Debug, PartialEq, Eq)]
@@ -174,6 +174,43 @@ pub fn occupant_is(output: &str, s: &Session) -> bool {
         Some("herdr") => v.pointer("/result/agent/agent_session/value").and_then(|x| x.as_str()) == Some(s.session_id.as_str()),
         Some("hc") => s.pid.is_some() && v.pointer("/foreground/pid").and_then(|x| x.as_i64()) == s.pid,
         _ => false,
+    }
+}
+
+/// The length at which the ask line cuts a question (`ASK_QUESTION_MAX_CHARS` in events.rs).
+const QUESTION_MAX_CHARS: usize = 200;
+
+/// Whether the Home page may press an option of the session's question: one question, not
+/// multi-select, with a text that is not empty and was not cut (at most 200 characters as
+/// recorded; a cut one ends in an added `…`), one to eight options, in an hc terminal. An empty
+/// or cut text cannot be matched against the message of `hc get`. A digit key picks and
+/// confirms an option there (seen with Claude Code 2.1.327); it was not tried in Herdr TUI or cmux.
+pub fn choosable(s: &Session) -> bool {
+    s.st == St::Asking
+        && s.term.as_deref() == Some("hc")
+        && s.term_id.is_some()
+        && matches!(s.ask.as_slice(), [q] if !q.multi
+            && !q.question.is_empty()
+            && q.question.chars().count() <= QUESTION_MAX_CHARS
+            && (1..=8).contains(&q.options.len()))
+}
+
+/// Whether the output of `hc get` shows the question prompt open: the status is blocked on a
+/// question whose message holds the recorded question. A digit typed anywhere else would land in
+/// the agent's prompt.
+pub fn question_open(output: &str, question: &str) -> bool {
+    let Ok(v) = serde_json::from_str::<serde_json::Value>(output) else {
+        return false;
+    };
+    let field = |k: &str| v.pointer(&format!("/status/{k}")).and_then(|x| x.as_str());
+    field("state") == Some("blocked") && field("kind") == Some("question") && field("msg").is_some_and(|m| m.contains(question))
+}
+
+/// The command that presses the digit key of option `option` (from 0) in an hc terminal.
+pub fn choose_command(s: &Session, option: usize) -> Option<Vec<String>> {
+    match (s.term.as_deref()?, s.term_id.as_deref()?) {
+        ("hc", id) => Some(vec!["hc".into(), "keys".into(), id.into(), (option + 1).to_string()]),
+        _ => None,
     }
 }
 

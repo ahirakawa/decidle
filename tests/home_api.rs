@@ -1065,3 +1065,123 @@ fn a_question_is_shown_with_the_permission_rows_until_it_is_answered() {
     assert_eq!(row["state"], "working");
     assert_eq!(row["ask"], json!([]));
 }
+
+static CHOOSE_CALLS: std::sync::Mutex<Vec<Vec<String>>> = std::sync::Mutex::new(Vec::new());
+/// The status `hc get` reports for every terminal.
+static CHOOSE_STATUS: std::sync::Mutex<Value> = std::sync::Mutex::new(Value::Null);
+
+/// An hc where t4 has a shell (pid 1) in front and every other terminal pid 4242, and where
+/// pressing keys in t6 fails.
+fn fake_hc_choose(argv: &[String]) -> Result<String, String> {
+    CHOOSE_CALLS.lock().unwrap().push(argv.to_vec());
+    match argv[1].as_str() {
+        "get" => {
+            let pid = if argv[2] == "t4" { 1 } else { 4242 };
+            let status = CHOOSE_STATUS.lock().unwrap().clone();
+            Ok(json!({"address": argv[2], "foreground": {"pid": pid}, "status": status}).to_string())
+        }
+        "keys" if argv[2] == "t6" => Err("hc: no such terminal".into()),
+        _ => Ok(String::new()),
+    }
+}
+
+#[test]
+fn an_option_is_pressed_once_and_only_into_an_open_single_choice_question() {
+    let dir = temp_dir();
+    let log = dir.join("events.jsonl");
+    let rec = |term: &str, id: &str| json!({"pid": 4242, "pid_started": 1, "term": term, "term_id": id});
+    let question = |text: &str, multi: bool| json!({"question": text, "header": "色", "options": ["赤", "青"], "multi": multi});
+    let one = |text: &str| json!({"ask": [question(text, false)]});
+    let cut = format!("{}…", "あ".repeat(200));
+    let lines: Vec<(&str, &str, Value)> = vec![
+        ("ok", "start", rec("hc", "t3")),
+        ("ok", "prompt", json!({})),
+        ("ok", "ask", one("古い問い")), // 2: replaced below
+        ("ok", "ask", one("好きな色は?")), // 3
+        ("ok", "permission", json!({})),
+        ("two", "start", rec("hc", "t5")),
+        ("two", "ask", json!({"ask": [question("好きな色は?", false), question("好きな色は?", false)]})), // 6
+        ("multi", "start", rec("hc", "t5")),
+        ("multi", "ask", json!({"ask": [question("好きな色は?", true)]})), // 8
+        ("herdr", "start", rec("herdr", "w1:p2")),
+        ("herdr", "ask", one("好きな色は?")), // 10
+        ("swapped", "start", rec("hc", "t4")),
+        ("swapped", "ask", one("好きな色は?")), // 12
+        ("done", "start", rec("hc", "t5")),
+        ("done", "ask", one("好きな色は?")), // 14
+        ("done", "asked", json!({})),
+        ("fail", "start", rec("hc", "t6")),
+        ("fail", "ask", one("好きな色は?")), // 17
+        ("empty", "start", rec("hc", "t5")),
+        ("empty", "ask", one("")), // 19
+        ("cut", "start", rec("hc", "t5")),
+        ("cut", "ask", one(&cut)), // 21: cut by the ask line
+    ];
+    let ts = write_log(&log, &lines, SystemTime::now() - Duration::from_secs(60));
+    let open = json!({"app": "claude-code", "kind": "question", "msg": "answer: 好きな色は? (赤 · 青)", "state": "blocked"});
+    *CHOOSE_STATUS.lock().unwrap() = open.clone();
+    let (port, token) = start_with(&log, fake_hc_choose);
+    let row = |sid: &str| sessions(port)["sessions"].as_array().unwrap().iter().find(|r| r["session_id"] == sid).unwrap().clone();
+    assert_eq!((row("ok")["ask_ts"].clone(), row("ok")["choosable"].clone()), (json!(ts[3]), json!(true)));
+    for sid in ["two", "multi", "herdr", "empty", "cut"] {
+        assert_eq!((row(sid)["ask_ts"].clone(), row(sid)["choosable"].clone()), (json!(ts[lines.iter().rposition(|l| l.0 == sid).unwrap()]), json!(false)), "{sid}");
+    }
+    assert_eq!((row("done")["ask_ts"].clone(), row("done")["choosable"].clone()), (Value::Null, json!(false)));
+
+    let choose = |sid: &str, ask: &str, option: usize| post(port, "/api/choose", &token, &json!({"session_id": sid, "ask": ask, "option": option}));
+    let refused = [
+        ("ok", ts[2].as_str(), 0),   // a stale ask
+        ("ok", ts[3].as_str(), 2),   // no such option
+        ("two", ts[6].as_str(), 0),  // two questions
+        ("multi", ts[8].as_str(), 0),
+        ("herdr", ts[10].as_str(), 0),
+        ("swapped", ts[12].as_str(), 0), // another program in front
+        ("done", ts[14].as_str(), 0),    // already answered in the terminal
+        ("empty", ts[19].as_str(), 0),   // no question text to match
+        ("cut", ts[21].as_str(), 0),     // a cut question text to match
+    ];
+    for (sid, ask, option) in refused {
+        let (status, out) = choose(sid, ask, option);
+        assert_eq!(status, 409, "{sid} {option}: {out}");
+    }
+    // The prompt is not open: not blocked, not a question, or another question.
+    let with = |k: &str, v: &str| {
+        let mut s = open.clone();
+        s[k] = json!(v);
+        s
+    };
+    for status in [with("state", "working"), with("kind", "permission"), with("msg", "answer: 別の問い (赤 · 青)"), Value::Null] {
+        *CHOOSE_STATUS.lock().unwrap() = status.clone();
+        assert_eq!(choose("ok", &ts[3], 1).0, 409, "{status}");
+    }
+    assert!(CHOOSE_CALLS.lock().unwrap().iter().all(|c| c[1] == "get"), "{:?}", CHOOSE_CALLS.lock().unwrap());
+    assert_eq!(count_of(&log, "choose"), 0);
+    // Without the token or with a body of the wrong shape, nothing is checked.
+    assert_eq!(request(port, "POST", "/api/choose", &[], &json!({"session_id": "ok", "ask": ts[3], "option": 1}).to_string()).0, 403);
+    assert_eq!(post(port, "/api/choose", &token, &json!({"session_id": "ok", "ask": ts[3]})).0, 400);
+    assert_eq!(post(port, "/api/choose", &token, &json!({"session_id": "ok", "ask": ts[3], "option": -1})).0, 400);
+
+    *CHOOSE_STATUS.lock().unwrap() = open;
+    CHOOSE_CALLS.lock().unwrap().clear();
+    let (status, out) = choose("ok", &ts[3], 1);
+    assert_eq!(status, 200, "{out}");
+    let strs = |v: &[&str]| v.iter().map(|s| s.to_string()).collect::<Vec<String>>();
+    assert_eq!(*CHOOSE_CALLS.lock().unwrap(), vec![strs(&["hc", "get", "t3"]), strs(&["hc", "keys", "t3", "2"])]);
+    let last: Value = serde_json::from_str(fs::read_to_string(&log).unwrap().lines().last().unwrap()).unwrap();
+    assert_eq!((&last["event"], &last["resolves"], &last["option"]), (&json!("choose"), &json!(ts[3]), &json!(1)));
+    let r = row("ok");
+    assert_eq!((r["state"].clone(), r["ask_ts"].clone(), r["ask"].clone()), (json!("working"), Value::Null, json!([])));
+    // A second press sends nothing.
+    assert_eq!(choose("ok", &ts[3], 1).0, 409);
+    assert_eq!(CHOOSE_CALLS.lock().unwrap().len(), 2);
+    assert_eq!(count_of(&log, "choose"), 1);
+    // The asked line that follows keeps it working.
+    append_raw(&log, &format!("{}\n", json!({"ts": ts_ago(0), "session_id": "ok", "cwd": "/work/ok", "event": "asked"})));
+    assert_eq!(row("ok")["state"], json!("working"));
+
+    // The key press fails: the line is already appended, so the row leaves the question.
+    let (status, out) = choose("fail", &ts[17], 0);
+    assert_eq!(status, 502, "{out}");
+    assert_eq!(count_of(&log, "choose"), 2);
+    assert_eq!(row("fail")["state"], json!("working"));
+}

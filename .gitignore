@@ -1,3 +1,5 @@
 target/
 baseline/
 .decidle/
+herdr-mod/decidle/gpui-kit.d.ts
+herdr-mod/decidle/jsconfig.json

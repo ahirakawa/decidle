@@ -318,3 +318,43 @@ fn a_question_waits_for_its_answer() {
     assert_eq!(s.st, St::Working);
     assert!(s.ask.is_empty());
 }
+
+#[test]
+fn a_chosen_option_ends_the_question_it_names() {
+    let q = Question { question: "q".into(), header: "h".into(), options: vec!["a".into(), "b".into()], multi: false };
+    let ev = |i: i64, kind: &str| Event {
+        ts: ts_of(i as usize),
+        ts_us: i,
+        session_id: "s".into(),
+        kind: Kind::parse(kind),
+        ..Event::default()
+    };
+    let ask = |i: i64| Event { ask: vec![q.clone()], ..ev(i, "ask") };
+    let choose = |i: i64, ask: usize| Event { resolves: Some(ts_of(ask)), option: Some(0), ..ev(i, "choose") };
+    let at = |log: &[Event]| state::derive(log).remove(0);
+
+    let mut log = vec![ev(1, "start"), ev(2, "prompt"), ask(3)];
+    assert_eq!(at(&log).ask_ts, Some(ts_of(3)));
+    // A choose for another ask, or with no ask named, changes nothing.
+    log.push(choose(4, 1));
+    log.push(Event { resolves: None, ..choose(5, 3) });
+    let s = at(&log);
+    assert_eq!((s.st, s.ask_ts.clone()), (St::Asking, Some(ts_of(3))));
+    // A new ask replaces the one a stale page names.
+    log.push(ask(6));
+    log.push(choose(7, 3));
+    assert_eq!(at(&log).ask_ts, Some(ts_of(6)));
+
+    log.push(choose(8, 6));
+    let s = at(&log);
+    assert_eq!(s.st, St::Working);
+    assert!(s.ask.is_empty() && s.ask_ts.is_none());
+    // The asked line that follows the key press keeps it working.
+    log.push(ev(9, "asked"));
+    assert_eq!(at(&log).st, St::Working);
+
+    // Outside a question, a choose is ignored.
+    log.push(ev(10, "stop"));
+    log.push(choose(11, 6));
+    assert_eq!(at(&log).st, St::Stopped);
+}

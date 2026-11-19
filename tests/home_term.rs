@@ -121,3 +121,53 @@ fn an_hc_terminal_holds_the_session_only_while_its_foreground_is_the_recorded_pi
     let unrecorded = Session { pid: None, ..s.clone() };
     assert!(!term::occupant_is(r#"{"foreground":{"pid":null}}"#, &unrecorded));
 }
+
+#[test]
+fn only_one_single_choice_question_in_an_hc_terminal_can_be_pressed() {
+    use decidle::home::state::{Question, St};
+    let q = |n: usize, multi: bool| Question { question: "q".into(), header: "h".into(), options: (0..n).map(|i| i.to_string()).collect(), multi };
+    let s = |term: &str, ask: Vec<Question>| Session {
+        st: St::Asking,
+        term: Some(term.into()),
+        term_id: Some("t3".into()),
+        ask,
+        ..Session::default()
+    };
+    assert!(term::choosable(&s("hc", vec![q(1, false)])));
+    assert!(term::choosable(&s("hc", vec![q(8, false)])));
+    assert!(!term::choosable(&s("hc", vec![q(0, false)])));
+    assert!(!term::choosable(&s("hc", vec![q(9, false)])));
+    assert!(!term::choosable(&s("hc", vec![q(2, true)])));
+    assert!(!term::choosable(&s("hc", vec![q(2, false), q(2, false)])));
+    // An empty question, or one the ask line cut (200 characters and an added `…`).
+    let text = |t: String| Question { question: t, ..q(2, false) };
+    assert!(term::choosable(&s("hc", vec![text("あ".repeat(200))])));
+    assert!(!term::choosable(&s("hc", vec![text(format!("{}…", "あ".repeat(200)))])));
+    assert!(!term::choosable(&s("hc", vec![text(String::new())])));
+    assert!(!term::choosable(&s("herdr", vec![q(2, false)])));
+    assert!(!term::choosable(&s("cmux", vec![q(2, false)])));
+    assert!(!term::choosable(&Session { st: St::Working, ..s("hc", vec![q(2, false)]) }));
+    assert!(!term::choosable(&Session { term_id: None, ..s("hc", vec![q(2, false)]) }));
+
+    assert_eq!(term::choose_command(&s("hc", vec![q(2, false)]), 1), Some(vec!["hc".into(), "keys".into(), "t3".into(), "2".into()]));
+    assert_eq!(term::choose_command(&s("herdr", vec![q(2, false)]), 1), None);
+}
+
+#[test]
+fn the_question_prompt_is_open_only_when_hc_shows_it_blocked_on_that_question() {
+    let get = |status: serde_json::Value| serde_json::json!({"address": "t3", "foreground": {"pid": 7}, "status": status}).to_string();
+    let open = serde_json::json!({"app": "claude-code", "kind": "question", "msg": "answer: 試しの問いです。好きな色はどちらですか？ (赤 · 青)", "state": "blocked"});
+    let q = "試しの問いです。好きな色はどちらですか？";
+    assert!(term::question_open(&get(open.clone()), q));
+    assert!(!term::question_open(&get(open.clone()), "別の問い"));
+    let with = |k: &str, v: &str| {
+        let mut s = open.clone();
+        s[k] = serde_json::json!(v);
+        get(s)
+    };
+    assert!(!term::question_open(&with("state", "working"), q));
+    assert!(!term::question_open(&with("kind", "permission"), q));
+    assert!(!term::question_open(&get(serde_json::json!({"app": "claude-code", "state": "blocked", "kind": "question"})), q));
+    assert!(!term::question_open(&get(serde_json::Value::Null), q));
+    assert!(!term::question_open("not json", q));
+}
